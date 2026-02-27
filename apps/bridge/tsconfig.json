@@ -7,5 +7,6 @@
       "@avatar-agent/utils": ["../../packages/utils/src/index.ts"]
     }
   },
-  "include": ["src", "../../packages/schema/src", "../../packages/utils/src"]
+  "include": ["src", "../../packages/schema/src", "../../packages/utils/src"],
+  "exclude": ["src/**/*.test.ts"]
 }
