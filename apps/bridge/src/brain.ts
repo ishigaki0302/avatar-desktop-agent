@@ -125,6 +125,9 @@ export async function ask(
       trimHistory();
       return renderEvent;
     } catch (err) {
+      if (err instanceof TypeError && (err as TypeError).message.includes("fetch")) {
+        broadcast({ type: "status", state: "error", message: "Ollama に接続できません" });
+      }
       log.warn(`Attempt ${attempt + 1} error`, err);
     }
   }
@@ -169,10 +172,10 @@ async function callOllama(system: string, messages: ChatMessage[]): Promise<stri
       format: "json",
       options: {
         temperature: 0.7,
-        num_predict: 512,
+        num_predict: config.ollama.maxPredictTokens,
       },
     }),
-    signal: AbortSignal.timeout(60_000),
+    signal: AbortSignal.timeout(config.ollama.timeoutMs),
   });
 
   if (!res.ok) {
