@@ -4,9 +4,8 @@
   "private": true,
   "main": "dist/main.js",
   "scripts": {
-    "dev": "tsx src/main.ts",
-    "dev:electron": "tsc && electron dist/main.js",
-    "build": "tsc",
+    "dev": "node scripts/dev.mjs",
+    "build": "node scripts/build.mjs",
     "typecheck": "tsc --noEmit",
     "test": "echo 'No ui unit tests yet'"
   },
@@ -14,11 +13,11 @@
     "@avatar-agent/schema": "workspace:*",
     "@avatar-agent/utils": "workspace:*",
     "dotenv": "^16.4.0",
-    "electron": "^34.0.0"
+    "electron": "^34.0.0",
+    "esbuild": "^0.24.0"
   },
   "devDependencies": {
     "@types/node": "^22.0.0",
-    "tsx": "^4.19.0",
     "typescript": "*"
   }
 }

@@ -23,7 +23,7 @@ const userInput  = document.getElementById("user-input") as HTMLInputElement;
 const sendBtn    = document.getElementById("send-btn") as HTMLButtonElement;
 
 // ── Components ────────────────────────────────────────────────────────────────
-const avatar = new AvatarRenderer(canvas, Number(8));
+const avatar = new AvatarRenderer(canvas, 8);
 
 const typewriter = new Typewriter(bubble, {
   onMouthOpen:  () => avatar.setMouthOpen(true),

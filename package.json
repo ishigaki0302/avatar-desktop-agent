@@ -4,7 +4,7 @@
   "version": "0.1.0",
   "description": "Desktop companion with sprite avatar, Ollama LLM, and OpenClaw desktop automation",
   "scripts": {
-    "dev": "concurrently --names \"bridge,ui\" --prefix-colors \"cyan,magenta\" \"pnpm --filter bridge dev\" \"pnpm --filter ui dev\"",
+    "dev": "concurrently --names \"bridge,ui\" --prefix-colors \"cyan,magenta\" --kill-others-on-fail \"pnpm --filter bridge dev\" \"pnpm --filter ui dev\"",
     "build": "pnpm -r build",
     "test": "pnpm -r test",
     "lint": "pnpm -r lint",
@@ -17,5 +17,8 @@
   "engines": {
     "node": ">=20.0.0",
     "pnpm": ">=9.0.0"
+  },
+  "pnpm": {
+    "onlyBuiltDependencies": ["electron", "esbuild"]
   }
 }

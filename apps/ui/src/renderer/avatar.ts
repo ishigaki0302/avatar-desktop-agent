@@ -10,7 +10,11 @@
  */
 import type { Emotion, Motion } from "@avatar-agent/schema";
 
-const SPRITE_BASE = "../../assets/sprites";
+// __SPRITE_BASE__ is injected by esbuild (absolute path to assets/sprites).
+// Falls back to a relative path for type-checker compatibility.
+declare const __SPRITE_BASE__: string;
+const SPRITE_BASE: string =
+  typeof __SPRITE_BASE__ !== "undefined" ? __SPRITE_BASE__ : "../../assets/sprites";
 
 interface AvatarState {
   emotion: Emotion;

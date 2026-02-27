@@ -2,6 +2,8 @@
  * Bridge entrypoint.
  * Starts the HTTP server and connects to Ollama.
  */
+// Load .env from project root (DOTENV_CONFIG_PATH env var set by dev script).
+// Must be the first import so env vars are set before utils/config.ts runs.
 import "dotenv/config";
 import { startServer } from "./server.js";
 import { createLogger } from "@avatar-agent/utils";

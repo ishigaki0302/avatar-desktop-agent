@@ -194,7 +194,7 @@ Brain は各ターン末に必要な差分だけ返す（変更なし → `"NOOP
 | フェーズ | 内容 | 状態 |
 |---------|------|------|
 | Phase 0 | Repo bootstrap (monorepo, config, schema) | ✅ |
-| Phase 1 | UI MVP (Electron + タイプライタ + 口パク) | 🚧 |
+| Phase 1 | UI MVP (Electron + タイプライタ + 口パク) | ✅ |
 | Phase 2 | Brain (Ollama/Qwen3:8b 接続 + JSON パーサ) | 📋 |
 | Phase 3 | OpenClaw task delegation | 📋 |
 | Phase 4 | Hardening (許可リスト, タイムアウト, エラー) | 📋 |
