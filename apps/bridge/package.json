@@ -10,7 +10,7 @@
     "start": "node dist/index.js",
     "typecheck": "tsc --noEmit",
     "pretest": "pnpm -C ../.. --filter @avatar-agent/utils --filter @avatar-agent/schema build",
-    "test": "tsx --test src/brain.test.ts src/openclaw.test.ts"
+    "test": "tsx --test src/brain.test.ts src/openclaw.test.ts src/memory.test.ts"
   },
   "dependencies": {
     "@avatar-agent/schema": "workspace:*",

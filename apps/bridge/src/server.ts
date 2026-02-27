@@ -14,6 +14,8 @@ import { ask } from "./brain.js";
 
 const log = createLogger("server");
 
+const MAX_SSE_CLIENTS = 3;
+
 // SSE subscriber registry
 type Subscriber = (event: UIEvent) => void;
 const subscribers = new Set<Subscriber>();
@@ -29,7 +31,7 @@ export function broadcast(event: UIEvent) {
 }
 
 export async function startServer() {
-  const app = Fastify({ logger: false });
+  const app = Fastify({ logger: false, bodyLimit: 8192 });
 
   await app.register(cors, {
     origin: false, // localhost only; no cross-origin
@@ -42,6 +44,10 @@ export async function startServer() {
 
   // ── SSE stream ──────────────────────────────────────────────────────────────
   app.get("/events", async (req, reply) => {
+    if (subscribers.size >= MAX_SSE_CLIENTS) {
+      return reply.status(429).send({ error: "Too many SSE clients" });
+    }
+
     reply.raw.setHeader("Content-Type", "text/event-stream");
     reply.raw.setHeader("Cache-Control", "no-cache");
     reply.raw.setHeader("Connection", "keep-alive");
@@ -103,6 +109,11 @@ export async function startServer() {
 
   const host = config.bridge.host;
   const port = config.bridge.port;
+
+  if (host !== "127.0.0.1" && host !== "localhost") {
+    log.warn(`Bridge bound to ${host} — consider using 127.0.0.1 for security`);
+  }
+
   await app.listen({ host, port });
   log.info(`Bridge listening on http://${host}:${port}`);
 }

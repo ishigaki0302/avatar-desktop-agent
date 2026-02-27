@@ -32,6 +32,8 @@ const typewriter = new Typewriter(bubble, {
 });
 
 // ── SSE connection ────────────────────────────────────────────────────────────
+let reconnectDelay = 3000;
+
 async function connectSSE() {
   const url = await window.avatarBridge.getSseUrl();
   const es = new EventSource(url);
@@ -39,6 +41,7 @@ async function connectSSE() {
   es.onmessage = (e: MessageEvent) => {
     try {
       const event = JSON.parse(e.data as string) as UIEvent;
+      reconnectDelay = 3000; // reset backoff on successful message
       handleEvent(event);
     } catch {
       console.error("Failed to parse SSE event", e.data);
@@ -47,8 +50,11 @@ async function connectSSE() {
 
   es.onerror = () => {
     setStatus("error", "Bridge に接続できません。再接続中...");
-    setTimeout(connectSSE, 3000);
     es.close();
+    setTimeout(() => {
+      reconnectDelay = Math.min(reconnectDelay * 2, 30_000);
+      connectSSE();
+    }, reconnectDelay);
   };
 }
 
