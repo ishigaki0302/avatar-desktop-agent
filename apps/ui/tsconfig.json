@@ -1,0 +1,14 @@
+{
+  "extends": "../../tsconfig.base.json",
+  "compilerOptions": {
+    "rootDir": "src",
+    "outDir": "dist",
+    "module": "CommonJS",
+    "moduleResolution": "Node",
+    "paths": {
+      "@avatar-agent/schema": ["../../packages/schema/src/index.ts"],
+      "@avatar-agent/utils": ["../../packages/utils/src/index.ts"]
+    }
+  },
+  "include": ["src"]
+}

@@ -1,0 +1,24 @@
+{
+  "name": "ui",
+  "version": "0.1.0",
+  "private": true,
+  "main": "dist/main.js",
+  "scripts": {
+    "dev": "tsx src/main.ts",
+    "dev:electron": "tsc && electron dist/main.js",
+    "build": "tsc",
+    "typecheck": "tsc --noEmit",
+    "test": "echo 'No ui unit tests yet'"
+  },
+  "dependencies": {
+    "@avatar-agent/schema": "workspace:*",
+    "@avatar-agent/utils": "workspace:*",
+    "dotenv": "^16.4.0",
+    "electron": "^34.0.0"
+  },
+  "devDependencies": {
+    "@types/node": "^22.0.0",
+    "tsx": "^4.19.0",
+    "typescript": "*"
+  }
+}

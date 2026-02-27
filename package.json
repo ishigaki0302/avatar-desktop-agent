@@ -1,0 +1,21 @@
+{
+  "name": "avatar-desktop-agent",
+  "private": true,
+  "version": "0.1.0",
+  "description": "Desktop companion with sprite avatar, Ollama LLM, and OpenClaw desktop automation",
+  "scripts": {
+    "dev": "concurrently --names \"bridge,ui\" --prefix-colors \"cyan,magenta\" \"pnpm --filter bridge dev\" \"pnpm --filter ui dev\"",
+    "build": "pnpm -r build",
+    "test": "pnpm -r test",
+    "lint": "pnpm -r lint",
+    "typecheck": "pnpm -r typecheck"
+  },
+  "devDependencies": {
+    "concurrently": "^9.1.0",
+    "typescript": "^5.7.0"
+  },
+  "engines": {
+    "node": ">=20.0.0",
+    "pnpm": ">=9.0.0"
+  }
+}
