@@ -30,7 +30,7 @@ function createWindow() {
 
   mainWindow.loadFile(join(__dirname, "renderer", "index.html"));
 
-  if (process.env["NODE_ENV"] === "development") {
+  if (process.env["DEVTOOLS"] === "1") {
     mainWindow.webContents.openDevTools({ mode: "detach" });
   }
 
