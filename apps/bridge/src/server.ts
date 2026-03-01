@@ -11,6 +11,7 @@ import cors from "@fastify/cors";
 import type { UIEvent } from "@avatar-agent/schema";
 import { config, createLogger } from "@avatar-agent/utils";
 import { ask } from "./brain.js";
+import type { SessionLogger } from "./session.js";
 
 const log = createLogger("server");
 
@@ -30,7 +31,7 @@ export function broadcast(event: UIEvent) {
   }
 }
 
-export async function startServer() {
+export async function startServer(session?: SessionLogger) {
   const app = Fastify({ logger: false, bodyLimit: 8192 });
 
   await app.register(cors, {
@@ -92,7 +93,7 @@ export async function startServer() {
     broadcast({ type: "status", state: "running", message: "考え中..." });
 
     try {
-      const renderEvent = await ask(message, broadcast);
+      const renderEvent = await ask(message, broadcast, session);
       broadcast(renderEvent);
       broadcast({ type: "status", state: "idle", message: "Ready" });
       return reply.send({ ok: true });
