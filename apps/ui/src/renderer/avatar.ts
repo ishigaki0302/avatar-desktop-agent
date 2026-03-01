@@ -102,17 +102,29 @@ export class AvatarRenderer {
     const w = this.canvas.width;
     const h = this.canvas.height;
 
-    // Try to load sprite
-    const spritePath = motion !== "none"
-      ? `${SPRITE_BASE}/motion_${motion}_${motionFrame}.png`
-      : `${SPRITE_BASE}/${emotion}_${mouthOpen ? "open" : "close"}.png`;
+    // Emotion sprite (always available as fallback)
+    const emotionPath = `${SPRITE_BASE}/${emotion}_${mouthOpen ? "open" : "close"}.png`;
+    const motionPath  = `${SPRITE_BASE}/motion_${motion}_${motionFrame}.png`;
 
-    this.loadImage(spritePath).then((img) => {
+    const primary   = motion !== "none" ? motionPath : emotionPath;
+    const fallback  = emotionPath;
+
+    this.loadImage(primary).then((img) => {
+      // If motion frame sprite is missing, fall back to emotion sprite
+      const draw = img ?? (primary !== fallback ? this.imageCache.get(fallback) ?? null : null);
       this.ctx.clearRect(0, 0, w, h);
-      if (img) {
-        this.ctx.drawImage(img, 0, 0, w, h);
+      if (draw) {
+        this.ctx.drawImage(draw, 0, 0, w, h);
       } else {
-        this.drawPlaceholder(emotion, mouthOpen);
+        // Emotion sprite not yet cached — load and draw it
+        this.loadImage(fallback).then((fb) => {
+          this.ctx.clearRect(0, 0, w, h);
+          if (fb) {
+            this.ctx.drawImage(fb, 0, 0, w, h);
+          } else {
+            this.drawPlaceholder(emotion, mouthOpen);
+          }
+        });
       }
     });
   }
