@@ -14,6 +14,7 @@ import { parseRenderEvent } from "@avatar-agent/schema";
 import { config, createLogger, extractJSON, truncate } from "@avatar-agent/utils";
 import { readMemory, applyMemoryUpdate } from "./memory.js";
 import { delegateTask } from "./openclaw.js";
+import type { SessionLogger } from "./session.js";
 
 const log = createLogger("brain");
 
@@ -32,7 +33,7 @@ const MAX_RETRIES = 2;
 const MAX_HISTORY_MESSAGES = 10; // granite4:3b はコンテキストが短いため絞る
 
 // ── System prompt ─────────────────────────────────────────────────────────────
-const SYSTEM_PROMPT = `\
+export const SYSTEM_PROMPT = `\
 あなたは「アリス」、明るくて親しみやすいデスクトップAIコンパニオンです。
 
 【キャラクター】
@@ -89,6 +90,7 @@ function trimHistory() {
 export async function ask(
   userMessage: string,
   broadcast: (event: UIEvent) => void,
+  session?: SessionLogger,
 ): Promise<RenderEvent> {
   if (STUB_MODE) {
     log.info(`[STUB] responding to: "${userMessage}"`);
@@ -104,6 +106,8 @@ export async function ask(
 
   history.push({ role: "user", content: userMessage });
   trimHistory();
+
+  const startMs = Date.now();
 
   for (let attempt = 0; attempt <= MAX_RETRIES; attempt++) {
     try {
@@ -156,6 +160,16 @@ export async function ask(
 
       history.push({ role: "assistant", content: JSON.stringify(parsed) });
       trimHistory();
+
+      // セッションログに記録（非同期・fire-and-forget）
+      session?.logTurn({
+        user: userMessage,
+        assistant: text,
+        emotion: renderEvent.emotion,
+        motion: renderEvent.motion,
+        latency_ms: Date.now() - startMs,
+      }).catch((e) => log.warn("session log failed", e));
+
       return renderEvent;
     } catch (err) {
       if (err instanceof TypeError && (err as TypeError).message.includes("fetch")) {
@@ -166,13 +180,23 @@ export async function ask(
   }
 
   log.error("All retries exhausted, using fallback");
+  const fallbackText = "すみません、うまく応答できませんでした。もう一度お試しください。";
   history.push({
     role: "assistant",
     content: '{"text":"すみません、うまく応答できませんでした。","emotion":"confused","motion":"none","memory_update":"NOOP","task":null}',
   });
+
+  session?.logTurn({
+    user: userMessage,
+    assistant: fallbackText,
+    emotion: "confused",
+    motion: "none",
+    latency_ms: Date.now() - startMs,
+  }).catch((e) => log.warn("session log failed", e));
+
   return {
     type: "render",
-    text: "すみません、うまく応答できませんでした。もう一度お試しください。",
+    text: fallbackText,
     emotion: "confused",
     motion: "none",
   };

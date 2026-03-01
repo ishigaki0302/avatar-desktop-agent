@@ -43,6 +43,9 @@ export const config = {
   memory: {
     dir: env("MEMORY_DIR", "./storage/memory"),
   },
+  session: {
+    dir: env("SESSION_DIR", "./storage/sessions"),
+  },
   // OpenClaw task allowlist
   openclaw_allow: [
     "browser_open",
