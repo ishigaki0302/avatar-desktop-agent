@@ -17,6 +17,16 @@ import { delegateTask } from "./openclaw.js";
 
 const log = createLogger("brain");
 
+// ── Stub mode (STUB_MODE=1 で Ollama なしで UI 確認可能) ──────────────────────
+const STUB_MODE = process.env["STUB_MODE"] === "1";
+const STUB_RESPONSES: RenderEvent[] = [
+  { type: "render", text: "こんにちは！今日も良い一日ですね。何かお手伝いできることはありますか？", emotion: "happy",     motion: "wave"      },
+  { type: "render", text: "えっ！本当ですか？それは驚きました！もっと教えてください。",                 emotion: "surprised", motion: "nod"       },
+  { type: "render", text: "なるほど、わかりました。よろしくお願いします！",                             emotion: "happy",     motion: "bow_small" },
+  { type: "render", text: "そうなんですね！面白いですね。",                                             emotion: "surprised", motion: "nod"       },
+];
+let stubIndex = 0;
+
 // ── Constants ─────────────────────────────────────────────────────────────────
 const MAX_RETRIES = 2;
 const MAX_HISTORY_MESSAGES = 20; // keep last N user+assistant turns
@@ -66,6 +76,13 @@ export async function ask(
   userMessage: string,
   broadcast: (event: UIEvent) => void,
 ): Promise<RenderEvent> {
+  if (STUB_MODE) {
+    log.info(`[STUB] responding to: "${userMessage}"`);
+    const response = STUB_RESPONSES[stubIndex % STUB_RESPONSES.length]!;
+    stubIndex++;
+    return response;
+  }
+
   const memory = await readMemory();
   const systemWithMemory = memory
     ? `${SYSTEM_PROMPT}\n\n# Current memory\n${memory}`
