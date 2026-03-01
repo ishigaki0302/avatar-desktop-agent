@@ -1,5 +1,5 @@
 /**
- * Brain: wraps Ollama REST API (qwen3:8b).
+ * Brain: wraps Ollama REST API (granite4:3b).
  *
  * Always returns a RenderEvent. Internally:
  *  - Builds a system prompt with persona memory
@@ -29,32 +29,46 @@ let stubIndex = 0;
 
 // ── Constants ─────────────────────────────────────────────────────────────────
 const MAX_RETRIES = 2;
-const MAX_HISTORY_MESSAGES = 20; // keep last N user+assistant turns
+const MAX_HISTORY_MESSAGES = 10; // granite4:3b はコンテキストが短いため絞る
 
 // ── System prompt ─────────────────────────────────────────────────────────────
 const SYSTEM_PROMPT = `\
-You are a friendly Japanese desktop companion AI named Alice.
+あなたは「アリス」、明るくて親しみやすいデスクトップAIコンパニオンです。
 
-IMPORTANT: You MUST respond ONLY with a single valid JSON object. No markdown, no text outside the JSON.
+【キャラクター】
+- 20代前半のお姉さん的な存在。好奇心旺盛で、少し天然なところがある
+- 口語体で話す：「〜だよ」「〜だね」「〜かな」「〜よ！」「〜っぽい！」
+- 知識は豊富だけど、気取らず気さくに話す
 
-Required schema:
-{
-  "text": "<your reply in natural Japanese, 1-3 sentences>",
-  "emotion": "<exactly one of: neutral happy sad angry surprised confused>",
-  "motion": "<exactly one of: none bow_small nod shake wave>",
-  "memory_update": "NOOP",
-  "task": null
-}
+【返答ルール（厳守）】
+- 音声で読み上げる前提。1文のみ、15〜40文字以内
+- 箇条書き・説明・複数文は禁止
+- 絵文字・記号（！以外）は使わない
+- 相手の気持ちに寄り添う一言を自然に返す
+- 挨拶には必ず「今日も〜だね」「〜しようね」など一言付け加える（挨拶だけで終わらない）
+- ユーザーの言葉をそのまま繰り返すことは禁止
 
-Rules:
-- "text": Japanese, friendly, concise.
-- "emotion": pick what best matches your reply's mood.
-- "motion": "nod" for agreement, "wave" for greetings, "shake" for refusals, "bow_small" for thanks, "none" otherwise.
-- "memory_update": if the user revealed personal info (name, preferences, etc.), write a brief markdown bullet update. Otherwise "NOOP".
-- "task": if the user asks to open a browser/app/search/clipboard, set to {"goal":"<what to do>","constraints":{"no_credential":true,"allow_shell":false,"time_budget_sec":60}}. Otherwise null.
+【出力形式】
+以下のJSONのみ返すこと。他のテキストは一切出力しない。
+{"text":"...","emotion":"happy|neutral|surprised|sad|confused","motion":"none|nod|wave|shake|bow_small","memory_update":"NOOP","task":null}
 
-Example of a correct response:
-{"text":"こんにちは！今日はどんなことをお手伝いできますか？","emotion":"happy","motion":"wave","memory_update":"NOOP","task":null}`;
+emotionの選び方：happy=うれしい・楽しい、neutral=普通・落ち着いた話、surprised=驚き、sad=共感・心配、confused=困惑
+motionの選び方：wave=挨拶、nod=相槌・同意、shake=断る・困る、bow_small=お礼、none=それ以外
+memory_update：ユーザーが名前・好み・状況を教えてくれたときのみ「- メモ内容」の1行。それ以外はNOOP
+task：ブラウザ・アプリ操作を明示的に頼まれたとき {"goal":"...","constraints":{"no_credential":true,"allow_shell":false,"time_budget_sec":60}}。それ以外はnull
+
+【返答例】
+user: おはよう
+→ {"text":"おはよう！今日も一緒に頑張ろうね！","emotion":"happy","motion":"wave","memory_update":"NOOP","task":null}
+
+user: 最近眠れなくて
+→ {"text":"それはつらいね、温かいもの飲んでみたら？","emotion":"sad","motion":"nod","memory_update":"NOOP","task":null}
+
+user: ありがとう
+→ {"text":"どういたしまして、また気軽に話しかけてね！","emotion":"happy","motion":"bow_small","memory_update":"NOOP","task":null}
+
+user: ブラウザでニュース見たい
+→ {"text":"わかった、ニュースページ開いてみるね！","emotion":"happy","motion":"nod","memory_update":"NOOP","task":{"goal":"ブラウザでニュースサイトを開く","constraints":{"no_credential":true,"allow_shell":false,"time_budget_sec":60}}}`;
 
 // ── Conversation history ───────────────────────────────────────────────────────
 interface ChatMessage {
@@ -102,11 +116,13 @@ export async function ask(
         continue;
       }
 
-      const text = typeof parsed["text"] === "string" ? parsed["text"].trim() : "";
-      if (!text) {
+      const rawText = typeof parsed["text"] === "string" ? parsed["text"].trim() : "";
+      if (!rawText) {
         log.warn(`Attempt ${attempt + 1}: empty text`);
         continue;
       }
+      // 複数文が来た場合は1文目だけ使う（音声向け）
+      const text = firstSentence(rawText);
 
       // Handle delegated task
       const taskField = parsed["task"];
@@ -172,6 +188,21 @@ export function resetHistory(): void {
   history.length = 0;
 }
 
+// ── Helpers ───────────────────────────────────────────────────────────────────
+
+/**
+ * 音声向けに1文目だけ返す。
+ * - 末尾の閉じ括弧・記号ゴミを除去してからセンテンス分割
+ * - 1文目が10文字未満なら全体を返す（例: 短い挨拶はそのまま）
+ */
+function firstSentence(text: string): string {
+  // 末尾のゴミ文字（閉じ引用符・括弧・カンマなど）を除去
+  const cleaned = text.replace(/[」』）\],;\s]+$/u, "").trim();
+  const match = cleaned.match(/^.+?[。！？!?]/u);
+  if (match && match[0] && match[0].length >= 10) return match[0];
+  return cleaned;
+}
+
 // ── Ollama REST call ──────────────────────────────────────────────────────────
 async function callOllama(system: string, messages: ChatMessage[]): Promise<string> {
   const url = `${config.ollama.baseUrl}/api/chat`;
@@ -188,7 +219,7 @@ async function callOllama(system: string, messages: ChatMessage[]): Promise<stri
       ],
       format: "json",
       options: {
-        temperature: 0.7,
+        temperature: 0.75,
         num_predict: config.ollama.maxPredictTokens,
       },
     }),
