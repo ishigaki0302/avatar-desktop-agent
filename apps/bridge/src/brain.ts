@@ -242,6 +242,7 @@ async function callOllama(system: string, messages: ChatMessage[]): Promise<stri
         ...messages,
       ],
       format: "json",
+      think: false,
       options: {
         temperature: 0.75,
         num_predict: config.ollama.maxPredictTokens,
