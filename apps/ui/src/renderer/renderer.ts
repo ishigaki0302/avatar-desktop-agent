@@ -2,7 +2,7 @@
  * Renderer process entrypoint.
  * Connects to Bridge SSE, dispatches render/status/result events to UI components.
  */
-import type { UIEvent, RenderEvent, StatusEvent, ResultEvent } from "@avatar-agent/schema";
+import type { UIEvent, RenderEvent, RenderStartEvent, RenderTokenEvent, StatusEvent, ResultEvent } from "@avatar-agent/schema";
 import { AvatarRenderer } from "./avatar.js";
 import { Typewriter } from "./typewriter.js";
 
@@ -60,9 +60,12 @@ async function connectSSE() {
 
 function handleEvent(event: UIEvent) {
   switch (event.type) {
-    case "render":  handleRender(event);  break;
-    case "status":  handleStatus(event);  break;
-    case "result":  handleResult(event);  break;
+    case "render":        handleRender(event);      break;
+    case "render_start":  handleRenderStart(event); break;
+    case "render_token":  handleRenderToken(event); break;
+    case "render_end":    handleRenderEnd();        break;
+    case "status":        handleStatus(event);      break;
+    case "result":        handleResult(event);      break;
   }
 }
 
@@ -71,6 +74,21 @@ function handleRender(event: RenderEvent) {
   avatar.setEmotion(event.emotion);
   if (event.motion !== "none") avatar.playMotion(event.motion);
   typewriter.play(event.text);
+}
+
+function handleRenderStart(event: RenderStartEvent) {
+  sendBtn.disabled = true;
+  avatar.setEmotion(event.emotion);
+  if (event.motion !== "none") avatar.playMotion(event.motion);
+  typewriter.startStream();
+}
+
+function handleRenderToken(event: RenderTokenEvent) {
+  typewriter.appendToken(event.token);
+}
+
+function handleRenderEnd() {
+  typewriter.endStream();
 }
 
 function handleStatus(event: StatusEvent) {

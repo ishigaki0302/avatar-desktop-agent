@@ -28,6 +28,8 @@ export class Typewriter {
   private cfg: Required<TypewriterConfig>;
   private callbacks: TypewriterCallbacks;
   private abortController: AbortController | null = null;
+  private streamTimer: ReturnType<typeof setInterval> | null = null;
+  private streamMouthOpen = true;
 
   constructor(el: HTMLElement, callbacks: TypewriterCallbacks, cfg: TypewriterConfig = {}) {
     this.el = el;
@@ -44,7 +46,41 @@ export class Typewriter {
   stop() {
     this.abortController?.abort();
     this.abortController = null;
+    if (this.streamTimer !== null) {
+      clearInterval(this.streamTimer);
+      this.streamTimer = null;
+    }
     this.callbacks.onMouthClose();
+  }
+
+  /** Begin streaming mode: clear bubble and start lipsync. */
+  startStream() {
+    this.stop();
+    this.el.textContent = "";
+    this.streamMouthOpen = true;
+    this.callbacks.onMouthOpen();
+    this.streamTimer = setInterval(() => {
+      this.streamMouthOpen = !this.streamMouthOpen;
+      if (this.streamMouthOpen) this.callbacks.onMouthOpen();
+      else this.callbacks.onMouthClose();
+    }, this.cfg.lipsyncToggleMs);
+  }
+
+  /** Append a token from the stream to the bubble. */
+  appendToken(token: string) {
+    for (const char of token) {
+      if (char === "\n") {
+        this.el.appendChild(document.createElement("br"));
+      } else {
+        this.el.appendChild(document.createTextNode(char));
+      }
+    }
+  }
+
+  /** End streaming mode: stop lipsync and notify done. */
+  endStream() {
+    this.stop();
+    this.callbacks.onDone();
   }
 
   async play(text: string) {

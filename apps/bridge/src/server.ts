@@ -93,8 +93,7 @@ export async function startServer(session?: SessionLogger) {
     broadcast({ type: "status", state: "running", message: "考え中..." });
 
     try {
-      const renderEvent = await ask(message, broadcast, session);
-      broadcast(renderEvent);
+      await ask(message, broadcast, session);
       broadcast({ type: "status", state: "idle", message: "Ready" });
       return reply.send({ ok: true });
     } catch (err) {
