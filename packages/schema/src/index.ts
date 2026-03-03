@@ -13,6 +13,22 @@ export interface RenderEvent {
   motion: Motion;
 }
 
+// ─── Streaming render events ──────────────────────────────────────────────────
+export interface RenderStartEvent {
+  type: "render_start";
+  emotion: Emotion;
+  motion: Motion;
+}
+
+export interface RenderTokenEvent {
+  type: "render_token";
+  token: string;
+}
+
+export interface RenderEndEvent {
+  type: "render_end";
+}
+
 // ─── Bridge → UI ─────────────────────────────────────────────────────────────
 export interface StatusEvent {
   type: "status";
@@ -26,7 +42,13 @@ export interface ResultEvent {
   details: string | null;
 }
 
-export type UIEvent = RenderEvent | StatusEvent | ResultEvent;
+export type UIEvent =
+  | RenderEvent
+  | RenderStartEvent
+  | RenderTokenEvent
+  | RenderEndEvent
+  | StatusEvent
+  | ResultEvent;
 
 // ─── Brain → Bridge / OpenClaw (internal) ────────────────────────────────────
 export interface TaskConstraints {
@@ -86,6 +108,17 @@ export function validateUIEvent(obj: unknown): obj is UIEvent {
       isValidEmotion(e["emotion"]) &&
       isValidMotion(e["motion"])
     );
+  }
+  if (t === "render_start") {
+    const e = obj as Record<string, unknown>;
+    return isValidEmotion(e["emotion"]) && isValidMotion(e["motion"]);
+  }
+  if (t === "render_token") {
+    const e = obj as Record<string, unknown>;
+    return typeof e["token"] === "string";
+  }
+  if (t === "render_end") {
+    return true;
   }
   if (t === "status") {
     const e = obj as Record<string, unknown>;
