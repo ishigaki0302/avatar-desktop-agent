@@ -1,5 +1,5 @@
 /**
- * Brain: wraps Ollama REST API (granite4:3b).
+ * Brain: wraps Ollama REST API (Qwen/Qwen3.5-4B).
  *
  * Always returns a RenderEvent. Internally:
  *  - Builds a system prompt with persona memory
@@ -30,7 +30,7 @@ let stubIndex = 0;
 
 // ── Constants ─────────────────────────────────────────────────────────────────
 const MAX_RETRIES = 2;
-const MAX_HISTORY_MESSAGES = 10; // granite4:3b はコンテキストが短いため絞る
+const MAX_HISTORY_MESSAGES = 10; // 音声向け短文生成のため会話履歴を絞る
 
 // ── System prompt ─────────────────────────────────────────────────────────────
 export const SYSTEM_PROMPT = `\
