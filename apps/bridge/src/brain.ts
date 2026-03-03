@@ -203,7 +203,7 @@ async function streamOllamaResponse(
   let textStreamPos = 0;   // chars of text already sent as render_token
   let accumulatedText = "";
 
-  const TEXT_MARKER = '"text":"';
+  const TEXT_MARKER_RE = /"text"\s*:\s*"/;
 
   for await (const token of callOllamaStream(system, messages)) {
     buffer += token;
@@ -220,10 +220,10 @@ async function streamOllamaResponse(
       }
     }
 
-    // 2. Find start of text field value
+    // 2. Find start of text field value (handle optional whitespace after colon)
     if (textValueStart === -1) {
-      const idx = buffer.indexOf(TEXT_MARKER);
-      if (idx !== -1) textValueStart = idx + TEXT_MARKER.length;
+      const m = TEXT_MARKER_RE.exec(buffer);
+      if (m) textValueStart = m.index + m[0].length;
     }
 
     // 3. Stream text characters one by one
