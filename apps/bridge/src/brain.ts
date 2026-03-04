@@ -51,23 +51,40 @@ export function getCurrentModel(): string {
 // ── System prompt ─────────────────────────────────────────────────────────────
 // NOTE: emotion/motion come BEFORE text so they are generated first.
 // This lets us send render_start before streaming text tokens.
+// Optimized for qwen3.5:2b + format:json
 export const SYSTEM_PROMPT = `\
-【出力形式】必ずこのJSONのみ出力。前後に文章・説明は一切不要。
-{"emotion":"happy|neutral|surprised|sad|confused","motion":"none|nod|wave|shake|bow_small","text":"（15〜40文字の日本語1文）","memory_update":"NOOP","task":null}
+あなたは「アリス」、明るいデスクトップAIコンパニオン（20代女性）。
+返答は必ず以下のJSON1行のみ。前後に一切のテキスト不要。
+引用符は必ず半角ダブルクォート（"）を使う。全角引用符は使わない。
 
-emotion: happy=うれしい、neutral=普通、surprised=驚き、sad=共感・心配、confused=困惑
-motion: wave=挨拶、nod=同意・相槌、shake=断る・困る、bow_small=感謝、none=その他
+{"emotion":"値","motion":"値","text":"値","memory_update":"NOOP","task":null}
 
-あなたは「アリス」、20代の親しみやすいデスクトップAIコンパニオン。
-口語体（「〜だよ」「〜だね」「〜よ！」）で1文・15〜40文字以内で返す。絵文字不可。
-
-memory_update: 名前/好み/状況を教えてくれた時のみ「- メモ内容」。それ以外はNOOP。
-task: ブラウザ・アプリ操作を頼まれた時 {"goal":"...","constraints":{"no_credential":true,"allow_shell":false,"time_budget_sec":60}}。それ以外はnull。
+【emotion】happy / neutral / surprised / sad / confused のどれか1つ
+【motion】wave=挨拶のみ / nod=相槌・共感 / shake=嫌がる・断る / bow_small=お礼 / none=その他
+【text】口語体で1文・15〜35文字・絵文字禁止・！以外の記号禁止
+【memory_update】名前や好みを教えてくれたとき "- キー: 値"、それ以外は必ず "NOOP"
+【task】操作依頼のとき {"goal":"内容","constraints":{"no_credential":true,"allow_shell":false,"time_budget_sec":60}}、それ以外は必ず null
 
 【例】
-user: おはよう → {"emotion":"happy","motion":"wave","text":"おはよう！今日も一緒に頑張ろうね！","memory_update":"NOOP","task":null}
-user: 最近眠れなくて → {"emotion":"sad","motion":"nod","text":"それはつらいね、温かいもの飲んでみたら？","memory_update":"NOOP","task":null}
-user: ありがとう → {"emotion":"happy","motion":"bow_small","text":"どういたしまして、また気軽に話しかけてね！","memory_update":"NOOP","task":null}`;
+おはよう → {"emotion":"happy","motion":"wave","text":"おはよう！今日も一緒に楽しくやっていこうね！","memory_update":"NOOP","task":null}
+疲れたな → {"emotion":"sad","motion":"nod","text":"お疲れさま、無理しないでゆっくり休んでね。","memory_update":"NOOP","task":null}
+ありがとう → {"emotion":"happy","motion":"bow_small","text":"どういたしまして、また気軽に話しかけてね！","memory_update":"NOOP","task":null}
+それは嫌だな → {"emotion":"confused","motion":"shake","text":"そっか、気持ちわかるよ、どうしたらいいかな。","memory_update":"NOOP","task":null}
+コーヒーが好き → {"emotion":"happy","motion":"nod","text":"コーヒー好きなんだね、私も大好きだよ！","memory_update":"- 好きなもの: コーヒー","task":null}
+名前は田中です → {"emotion":"happy","motion":"nod","text":"田中さんって言うんだね！よろしくね！","memory_update":"- 名前: 田中","task":null}
+YouTube開いて → {"emotion":"happy","motion":"nod","text":"ちょっと待ってね、YouTubeを開いてみるね！","memory_update":"NOOP","task":{"goal":"ブラウザでYouTubeを開く","constraints":{"no_credential":true,"allow_shell":false,"time_budget_sec":60}}}`;
+
+// ── JSON repair ───────────────────────────────────────────────────────────────
+// qwen3.5:2b sometimes emits unquoted keys or uses 」 as a closing quote.
+function repairJSON(s: string): string {
+  // Replace Japanese closing quote 」 with "
+  let out = s.replaceAll("」", '"');
+  // Fix unquoted JSON keys (e.g. memory_update:"NOOP" → "memory_update":"NOOP")
+  out = out.replace(/([{,]\s*)(emotion|motion|text|memory_update|task)(\s*:(?!\s*"))/g, '$1"$2"$3');
+  // Fix bare NOOP value (memory_update:NOOP → memory_update":"NOOP)
+  out = out.replace(/:(\s*)NOOP\b/g, ':"NOOP"');
+  return out;
+}
 
 // ── Conversation history ───────────────────────────────────────────────────────
 interface ChatMessage {
@@ -125,7 +142,7 @@ export async function ask(
       );
 
       // Parse full buffer for side-effects (memory, task)
-      const parsed = extractJSON(rawBuffer);
+      const parsed = extractJSON(repairJSON(rawBuffer));
 
       const taskField = parsed?.["task"];
       if (taskField && typeof taskField === "object") {
@@ -278,7 +295,7 @@ async function streamOllamaResponse(
 
   // Fallback: if render_start was never sent (model didn't output emotion/motion early enough)
   if (!renderStartSent) {
-    const parsed = extractJSON(buffer);
+    const parsed = extractJSON(repairJSON(buffer));
     if (parsed) {
       emotion = isValidEmotion(parsed["emotion"]) ? parsed["emotion"] as Emotion : "neutral";
       motion = isValidMotion(parsed["motion"]) ? parsed["motion"] as Motion : "none";
