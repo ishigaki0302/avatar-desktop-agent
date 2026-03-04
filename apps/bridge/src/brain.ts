@@ -315,6 +315,7 @@ async function* callOllamaStream(
       model: currentModel,
       stream: true,
       think: false,
+      format: "json",
       messages: [
         { role: "system", content: system },
         ...messages,
