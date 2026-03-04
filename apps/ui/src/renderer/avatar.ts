@@ -1,191 +1,115 @@
 /**
- * Avatar renderer using Canvas 2D.
+ * Avatar renderer using hand-drawn images.
  *
- * Sprite layout (assets/sprites/):
- *   {emotion}_open.png   — mouth open
- *   {emotion}_close.png  — mouth closed
- *   motion_{name}_{N}.png — motion frame N (0-indexed)
+ * Images (assets/sprites/):
+ *   alice_normal.jpg     — default (eyes open, mouth closed)
+ *   alice_mouth_open.jpg — lipsync mouth open
+ *   alice_eyes_closed.jpg — blink frame
  *
- * Falls back to a colored rectangle placeholder when images are missing.
+ * Clipping: all source images are 1000×1000.
+ * The drawn character occupies x=122–725, y=90–701 → crop w=603, h=611.
  */
 import type { Emotion, Motion } from "@avatar-agent/schema";
 
 // __SPRITE_BASE__ is injected by esbuild (absolute path to assets/sprites).
-// Falls back to a relative path for type-checker compatibility.
 declare const __SPRITE_BASE__: string;
 const SPRITE_BASE: string =
   typeof __SPRITE_BASE__ !== "undefined" ? __SPRITE_BASE__ : "../../assets/sprites";
 
-interface AvatarState {
-  emotion: Emotion;
-  mouthOpen: boolean;
-  motion: Motion;
-  motionFrame: number;
-  motionTimer: ReturnType<typeof setInterval> | null;
-}
+// Source crop region (pixels, within 1000×1000 source images)
+const CROP_X = 122;
+const CROP_Y = 90;
+const CROP_W = 603;
+const CROP_H = 611;
 
-const MOTION_FRAMES: Record<Motion, number> = {
-  none: 0,
-  bow_small: 4,
-  nod: 3,
-  shake: 4,
-  wave: 6,
-};
+const IMG_NORMAL      = `${SPRITE_BASE}/alice_normal.jpg`;
+const IMG_MOUTH_OPEN  = `${SPRITE_BASE}/alice_mouth_open.jpg`;
+const IMG_EYES_CLOSED = `${SPRITE_BASE}/alice_eyes_closed.jpg`;
 
-// Placeholder colors per emotion (used when sprites are missing)
-const EMOTION_COLORS: Record<Emotion, string> = {
-  neutral:   "#a8d8ea",
-  happy:     "#ffd700",
-  sad:       "#7eb8d4",
-  angry:     "#ff7675",
-  surprised: "#fd79a8",
-  confused:  "#a29bfe",
-};
+// Blink timing
+const BLINK_INTERVAL_MIN_MS = 3000;
+const BLINK_INTERVAL_MAX_MS = 6000;
+const BLINK_DURATION_MS     = 120;
 
 export class AvatarRenderer {
   private canvas: HTMLCanvasElement;
   private ctx: CanvasRenderingContext2D;
-  private state: AvatarState;
+  private mouthOpen = false;
+  private eyesClosed = false;
   private imageCache = new Map<string, HTMLImageElement | null>();
-  private fps: number;
+  private blinkTimer: ReturnType<typeof setTimeout> | null = null;
 
-  constructor(canvas: HTMLCanvasElement, fps = 8) {
+  constructor(canvas: HTMLCanvasElement, _fps = 8) {
     this.canvas = canvas;
     this.ctx = canvas.getContext("2d")!;
-    this.fps = fps;
-    this.state = {
-      emotion: "neutral",
-      mouthOpen: false,
-      motion: "none",
-      motionFrame: 0,
-      motionTimer: null,
-    };
-    this.render();
+    void this.preloadAll();
+    this.scheduleBlink();
   }
 
-  setEmotion(emotion: Emotion) {
-    this.state.emotion = emotion;
+  setEmotion(_emotion: Emotion) {
+    // Single set of hand-drawn images — emotion expressed via speech bubble
     this.render();
   }
 
   setMouthOpen(open: boolean) {
-    this.state.mouthOpen = open;
+    this.mouthOpen = open;
     this.render();
   }
 
-  playMotion(motion: Motion) {
-    if (this.state.motionTimer) clearInterval(this.state.motionTimer);
-    this.state.motion = motion;
-    this.state.motionFrame = 0;
-
-    if (motion === "none" || MOTION_FRAMES[motion] === 0) {
-      this.state.motionTimer = null;
-      this.render();
-      return;
-    }
-
-    this.state.motionTimer = setInterval(() => {
-      this.state.motionFrame++;
-      const maxFrames = MOTION_FRAMES[this.state.motion];
-      if (this.state.motionFrame >= maxFrames) {
-        clearInterval(this.state.motionTimer!);
-        this.state.motionTimer = null;
-        this.state.motion = "none";
-        this.state.motionFrame = 0;
-      }
-      this.render();
-    }, 1000 / this.fps);
+  playMotion(_motion: Motion) {
+    // No separate motion sprites; motion intent is expressed via speech bubble
+    this.render();
   }
+
+  // ── Private ────────────────────────────────────────────────────────────────
 
   private render() {
-    const { emotion, mouthOpen, motion, motionFrame } = this.state;
+    const src = this.eyesClosed
+      ? IMG_EYES_CLOSED
+      : this.mouthOpen
+        ? IMG_MOUTH_OPEN
+        : IMG_NORMAL;
+
+    const img = this.imageCache.get(src);
+    if (!img) return; // still loading; preloadAll triggers render when ready
+
     const w = this.canvas.width;
     const h = this.canvas.height;
-
-    // Emotion sprite (always available as fallback)
-    const emotionPath = `${SPRITE_BASE}/${emotion}_${mouthOpen ? "open" : "close"}.png`;
-    const motionPath  = `${SPRITE_BASE}/motion_${motion}_${motionFrame}.png`;
-
-    const primary   = motion !== "none" ? motionPath : emotionPath;
-    const fallback  = emotionPath;
-
-    this.loadImage(primary).then((img) => {
-      // If motion frame sprite is missing, fall back to emotion sprite
-      const draw = img ?? (primary !== fallback ? this.imageCache.get(fallback) ?? null : null);
-      this.ctx.clearRect(0, 0, w, h);
-      if (draw) {
-        this.ctx.drawImage(draw, 0, 0, w, h);
-      } else {
-        // Emotion sprite not yet cached — load and draw it
-        this.loadImage(fallback).then((fb) => {
-          this.ctx.clearRect(0, 0, w, h);
-          if (fb) {
-            this.ctx.drawImage(fb, 0, 0, w, h);
-          } else {
-            this.drawPlaceholder(emotion, mouthOpen);
-          }
-        });
-      }
-    });
+    this.ctx.clearRect(0, 0, w, h);
+    this.ctx.drawImage(img, CROP_X, CROP_Y, CROP_W, CROP_H, 0, 0, w, h);
   }
 
-  private drawPlaceholder(emotion: Emotion, mouthOpen: boolean) {
-    const w = this.canvas.width;
-    const h = this.canvas.height;
-    const ctx = this.ctx;
+  private scheduleBlink() {
+    const delay =
+      BLINK_INTERVAL_MIN_MS +
+      Math.random() * (BLINK_INTERVAL_MAX_MS - BLINK_INTERVAL_MIN_MS);
 
-    ctx.clearRect(0, 0, w, h);
-
-    // Body circle
-    ctx.beginPath();
-    ctx.arc(w / 2, h / 2 - 20, 120, 0, Math.PI * 2);
-    ctx.fillStyle = EMOTION_COLORS[emotion];
-    ctx.fill();
-    ctx.strokeStyle = "rgba(0,0,0,0.15)";
-    ctx.lineWidth = 2;
-    ctx.stroke();
-
-    // Eyes
-    ctx.fillStyle = "#333";
-    ctx.beginPath();
-    ctx.arc(w / 2 - 35, h / 2 - 30, 10, 0, Math.PI * 2);
-    ctx.fill();
-    ctx.beginPath();
-    ctx.arc(w / 2 + 35, h / 2 - 30, 10, 0, Math.PI * 2);
-    ctx.fill();
-
-    // Mouth
-    ctx.beginPath();
-    if (mouthOpen) {
-      ctx.ellipse(w / 2, h / 2 + 20, 28, 18, 0, 0, Math.PI * 2);
-      ctx.fillStyle = "#333";
-      ctx.fill();
-    } else {
-      ctx.arc(w / 2, h / 2 + 10, 28, 0, Math.PI);
-      ctx.strokeStyle = "#333";
-      ctx.lineWidth = 3;
-      ctx.stroke();
-    }
-
-    // Emotion label (debug)
-    ctx.fillStyle = "rgba(0,0,0,0.4)";
-    ctx.font = "12px sans-serif";
-    ctx.textAlign = "center";
-    ctx.fillText(emotion, w / 2, h - 20);
+    this.blinkTimer = setTimeout(() => {
+      this.eyesClosed = true;
+      this.render();
+      setTimeout(() => {
+        this.eyesClosed = false;
+        this.render();
+        this.scheduleBlink();
+      }, BLINK_DURATION_MS);
+    }, delay);
   }
 
-  private async loadImage(src: string): Promise<HTMLImageElement | null> {
-    if (this.imageCache.has(src)) return this.imageCache.get(src)!;
+  private async preloadAll() {
+    await Promise.all([
+      this.loadImage(IMG_NORMAL),
+      this.loadImage(IMG_MOUTH_OPEN),
+      this.loadImage(IMG_EYES_CLOSED),
+    ]);
+    this.render();
+  }
+
+  private loadImage(src: string): Promise<HTMLImageElement | null> {
+    if (this.imageCache.has(src)) return Promise.resolve(this.imageCache.get(src)!);
     return new Promise((resolve) => {
       const img = new Image();
-      img.onload = () => {
-        this.imageCache.set(src, img);
-        resolve(img);
-      };
-      img.onerror = () => {
-        this.imageCache.set(src, null);
-        resolve(null);
-      };
+      img.onload = () => { this.imageCache.set(src, img); resolve(img); };
+      img.onerror = () => { this.imageCache.set(src, null); resolve(null); };
       img.src = src;
     });
   }
