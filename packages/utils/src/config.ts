@@ -20,8 +20,8 @@ function envInt(key: string, fallback: number): number {
 export const config = {
   ollama: {
     baseUrl:          env("OLLAMA_BASE_URL", "http://localhost:11434"),
-    model:            env("OLLAMA_MODEL", "Qwen/Qwen3.5-4B"),
-    availableModels:  env("OLLAMA_AVAILABLE_MODELS", "Qwen/Qwen3.5-4B,qwen3.5:0.8b").split(",") as string[],
+    model:            env("OLLAMA_MODEL", "qwen3.5:2b"),
+    availableModels:  env("OLLAMA_AVAILABLE_MODELS", "qwen3.5:2b").split(",") as string[],
     timeoutMs:        envInt("OLLAMA_TIMEOUT_MS", 60_000),
     maxPredictTokens: envInt("OLLAMA_MAX_PREDICT", 512),
   },
