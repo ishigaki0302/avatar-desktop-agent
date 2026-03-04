@@ -31,6 +31,23 @@ let stubIndex = 0;
 const MAX_RETRIES = 2;
 const MAX_HISTORY_MESSAGES = 10;
 
+// ── Runtime model state ───────────────────────────────────────────────────────
+let currentModel = config.ollama.model;
+
+export function setModel(model: string): void {
+  if (!config.ollama.availableModels.includes(model)) {
+    throw new Error(`Unknown model: ${model}. Available: ${config.ollama.availableModels.join(", ")}`);
+  }
+  currentModel = model;
+  // Reset conversation history when switching models
+  history.length = 0;
+  log.info(`Model switched to: ${model}`);
+}
+
+export function getCurrentModel(): string {
+  return currentModel;
+}
+
 // ── System prompt ─────────────────────────────────────────────────────────────
 // NOTE: emotion/motion come BEFORE text so they are generated first.
 // This lets us send render_start before streaming text tokens.
@@ -86,6 +103,11 @@ function trimHistory() {
   }
 }
 
+// ── Ollama metrics ────────────────────────────────────────────────────────────
+interface OllamaMetrics {
+  tokensPerSec?: number;
+}
+
 // ── Public API ────────────────────────────────────────────────────────────────
 export async function ask(
   userMessage: string,
@@ -116,7 +138,7 @@ export async function ask(
 
   for (let attempt = 0; attempt <= MAX_RETRIES; attempt++) {
     try {
-      const { text, emotion, motion, rawBuffer } = await streamOllamaResponse(
+      const { text, emotion, motion, rawBuffer, tokensPerSec, ttftMs } = await streamOllamaResponse(
         systemWithMemory,
         history,
         broadcast,
@@ -150,6 +172,8 @@ export async function ask(
         emotion,
         motion,
         latency_ms: Date.now() - startMs,
+        tokens_per_sec: tokensPerSec,
+        ttft_ms: ttftMs,
       }).catch((e) => log.warn("session log failed", e));
 
       return;
@@ -193,7 +217,7 @@ async function streamOllamaResponse(
   system: string,
   messages: ChatMessage[],
   broadcast: (event: UIEvent) => void,
-): Promise<{ text: string; emotion: Emotion; motion: Motion; rawBuffer: string }> {
+): Promise<{ text: string; emotion: Emotion; motion: Motion; rawBuffer: string; tokensPerSec?: number; ttftMs?: number }> {
   let buffer = "";
   let emotion: Emotion = "neutral";
   let motion: Motion = "none";
@@ -202,10 +226,23 @@ async function streamOllamaResponse(
   let textValueEnd = -1;   // index in buffer of the closing '"' of text value
   let textStreamPos = 0;   // chars of text already sent as render_token
   let accumulatedText = "";
+  let ttftMs: number | undefined;
+  let isFirstToken = true;
+  const streamStartMs = Date.now();
 
   const TEXT_MARKER_RE = /"text"\s*:\s*"/;
 
-  for await (const token of callOllamaStream(system, messages)) {
+  const gen = callOllamaStream(system, messages);
+  let next = await gen.next();
+
+  while (!next.done) {
+    const token = next.value;
+
+    if (isFirstToken) {
+      ttftMs = Date.now() - streamStartMs;
+      isFirstToken = false;
+    }
+
     buffer += token;
 
     // 1. Detect emotion and motion → send render_start
@@ -233,12 +270,12 @@ async function streamOllamaResponse(
         const char = buffer[i]!;
         if (char === "\\") {
           if (i + 1 >= buffer.length) break; // wait for next token
-          const next = buffer[i + 1]!;
+          const next2 = buffer[i + 1]!;
           const actual =
-            next === "n" ? "\n" :
-            next === "t" ? "\t" :
-            next === '"' ? '"' :
-            next;
+            next2 === "n" ? "\n" :
+            next2 === "t" ? "\t" :
+            next2 === '"' ? '"' :
+            next2;
           broadcast({ type: "render_token", token: actual });
           accumulatedText += actual;
           textStreamPos += 2;
@@ -253,7 +290,11 @@ async function streamOllamaResponse(
         }
       }
     }
+
+    next = await gen.next();
   }
+
+  const metrics: OllamaMetrics = next.value;
 
   // Fallback: if render_start was never sent (model didn't output emotion/motion early enough)
   if (!renderStartSent) {
@@ -276,22 +317,22 @@ async function streamOllamaResponse(
     throw new Error("No text extracted from stream");
   }
 
-  log.debug("Stream complete", { chars: accumulatedText.length, emotion, motion });
-  return { text: accumulatedText, emotion, motion, rawBuffer: buffer };
+  log.debug("Stream complete", { chars: accumulatedText.length, emotion, motion, tokensPerSec: metrics.tokensPerSec, ttftMs });
+  return { text: accumulatedText, emotion, motion, rawBuffer: buffer, tokensPerSec: metrics.tokensPerSec, ttftMs };
 }
 
 // ── Ollama streaming REST call ────────────────────────────────────────────────
 async function* callOllamaStream(
   system: string,
   messages: ChatMessage[],
-): AsyncGenerator<string> {
+): AsyncGenerator<string, OllamaMetrics> {
   const url = `${config.ollama.baseUrl}/api/chat`;
 
   const res = await fetch(url, {
     method: "POST",
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify({
-      model: config.ollama.model,
+      model: currentModel,
       stream: true,
       think: false,
       messages: [
@@ -316,6 +357,7 @@ async function* callOllamaStream(
 
   const reader = res.body.getReader();
   const decoder = new TextDecoder();
+  let metrics: OllamaMetrics = {};
 
   try {
     while (true) {
@@ -329,9 +371,18 @@ async function* callOllamaStream(
           const data = JSON.parse(line) as {
             message?: { content?: string };
             done?: boolean;
+            eval_count?: number;
+            eval_duration?: number;
           };
           if (data.message?.content) yield data.message.content;
-          if (data.done) return;
+          if (data.done) {
+            const ec = data.eval_count;
+            const ed = data.eval_duration;
+            metrics = {
+              tokensPerSec: ec && ed ? ec / (ed / 1e9) : undefined,
+            };
+            return metrics;
+          }
         } catch {
           // partial line; will be completed in next chunk
         }
@@ -340,4 +391,6 @@ async function* callOllamaStream(
   } finally {
     reader.releaseLock();
   }
+
+  return metrics;
 }

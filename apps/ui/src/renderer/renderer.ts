@@ -16,11 +16,12 @@ declare global {
 }
 
 // ── DOM refs ─────────────────────────────────────────────────────────────────
-const canvas     = document.getElementById("avatar-canvas") as HTMLCanvasElement;
-const bubble     = document.getElementById("speech-bubble") as HTMLDivElement;
-const statusBar  = document.getElementById("status-bar") as HTMLDivElement;
-const userInput  = document.getElementById("user-input") as HTMLInputElement;
-const sendBtn    = document.getElementById("send-btn") as HTMLButtonElement;
+const canvas      = document.getElementById("avatar-canvas") as HTMLCanvasElement;
+const bubble      = document.getElementById("speech-bubble") as HTMLDivElement;
+const statusBar   = document.getElementById("status-bar") as HTMLDivElement;
+const userInput   = document.getElementById("user-input") as HTMLInputElement;
+const sendBtn     = document.getElementById("send-btn") as HTMLButtonElement;
+const modelSelect = document.getElementById("model-select") as HTMLSelectElement;
 
 // ── Components ────────────────────────────────────────────────────────────────
 const avatar = new AvatarRenderer(canvas, 8);
@@ -29,6 +30,46 @@ const typewriter = new Typewriter(bubble, {
   onMouthOpen:  () => avatar.setMouthOpen(true),
   onMouthClose: () => avatar.setMouthOpen(false),
   onDone:       () => { sendBtn.disabled = false; },
+});
+
+// ── Bridge base URL ───────────────────────────────────────────────────────────
+let bridgeBase = "";
+
+async function initBridgeBase() {
+  const sseUrl = await window.avatarBridge.getSseUrl();
+  bridgeBase = sseUrl.replace(/\/events$/, "");
+}
+
+// ── Model selector ────────────────────────────────────────────────────────────
+async function loadModels() {
+  try {
+    const res = await fetch(`${bridgeBase}/models`);
+    if (!res.ok) return;
+    const data = await res.json() as { current: string; available: string[] };
+    modelSelect.innerHTML = "";
+    for (const m of data.available) {
+      const opt = document.createElement("option");
+      opt.value = m;
+      opt.textContent = m;
+      if (m === data.current) opt.selected = true;
+      modelSelect.appendChild(opt);
+    }
+  } catch {
+    // Bridge not yet ready — ignore
+  }
+}
+
+modelSelect.addEventListener("change", async () => {
+  const model = modelSelect.value;
+  try {
+    await fetch(`${bridgeBase}/model`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ model }),
+    });
+  } catch {
+    setStatus("error", "モデル切替に失敗しました");
+  }
 });
 
 // ── SSE connection ────────────────────────────────────────────────────────────
@@ -130,5 +171,8 @@ userInput.addEventListener("keydown", (e) => {
 });
 
 // ── Boot ──────────────────────────────────────────────────────────────────────
-connectSSE();
+initBridgeBase().then(() => {
+  connectSSE();
+  loadModels();
+});
 bubble.textContent = "こんにちは！話しかけてみてください。";

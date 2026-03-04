@@ -35,6 +35,8 @@ interface TurnRecord {
   emotion: string;
   motion: string;
   latency_ms: number;
+  tokens_per_sec?: number;
+  ttft_ms?: number;
 }
 
 interface SessionEndRecord {
@@ -91,6 +93,8 @@ export class SessionLogger {
     emotion: string;
     motion: string;
     latency_ms: number;
+    tokens_per_sec?: number;
+    ttft_ms?: number;
   }): Promise<void> {
     await this.ready;
     this.turnCount++;
