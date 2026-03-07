@@ -18,12 +18,19 @@ function envInt(key: string, fallback: number): number {
 }
 
 export const config = {
+  brainBackend: env("BRAIN_BACKEND", "ollama") as "ollama" | "remote-gpu",
   ollama: {
     baseUrl:          env("OLLAMA_BASE_URL", "http://localhost:11434"),
     model:            env("OLLAMA_MODEL", "qwen3.5:2b"),
     availableModels:  env("OLLAMA_AVAILABLE_MODELS", "qwen3.5:2b").split(",") as string[],
     timeoutMs:        envInt("OLLAMA_TIMEOUT_MS", 60_000),
     maxPredictTokens: envInt("OLLAMA_MAX_PREDICT", 512),
+  },
+  remoteGpu: {
+    baseUrl:       env("REMOTE_GPU_BASE_URL", "http://127.0.0.1:10003"),
+    maxNewTokens:  envInt("REMOTE_GPU_MAX_NEW_TOKENS", 512),
+    temperature:   parseFloat(env("REMOTE_GPU_TEMPERATURE", "0.75")),
+    timeoutMs:     envInt("REMOTE_GPU_TIMEOUT_MS", 120_000),
   },
   bridge: {
     port: envInt("BRIDGE_PORT", 3000),

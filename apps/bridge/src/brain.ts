@@ -35,6 +35,9 @@ const MAX_HISTORY_MESSAGES = 10;
 let currentModel = config.ollama.model;
 
 export function setModel(model: string): void {
+  if (config.brainBackend === "remote-gpu") {
+    throw new Error("Model switching is not supported for remote-gpu backend");
+  }
   if (!config.ollama.availableModels.includes(model)) {
     throw new Error(`Unknown model: ${model}. Available: ${config.ollama.availableModels.join(", ")}`);
   }
@@ -229,6 +232,10 @@ async function streamOllamaResponse(
 
   const TEXT_MARKER_RE = /"text"\s*:\s*"/;
 
+  if (config.brainBackend === "remote-gpu") {
+    return callRemoteGpuResponse(system, messages, broadcast);
+  }
+
   const gen = callOllamaStream(system, messages);
   let next = await gen.next();
 
@@ -316,6 +323,72 @@ async function streamOllamaResponse(
 
   log.debug("Stream complete", { chars: accumulatedText.length, emotion, motion, tokensPerSec: metrics.tokensPerSec, ttftMs });
   return { text: accumulatedText, emotion, motion, rawBuffer: buffer, tokensPerSec: metrics.tokensPerSec, ttftMs };
+}
+
+// ── Remote GPU (non-streaming) REST call ──────────────────────────────────────
+async function callRemoteGpuResponse(
+  system: string,
+  messages: ChatMessage[],
+  broadcast: (event: UIEvent) => void,
+): Promise<{ text: string; emotion: Emotion; motion: Motion; rawBuffer: string; tokensPerSec?: number; ttftMs?: number }> {
+  const { baseUrl, maxNewTokens, temperature, timeoutMs } = config.remoteGpu;
+
+  // Build prompt: system + conversation history as plain text
+  const historyText = messages
+    .map((m) => (m.role === "user" ? `ユーザー: ${m.content}` : `アシスタント: ${m.content}`))
+    .join("\n");
+  const prompt = `${system}\n\n${historyText}\nアシスタント:`;
+
+  const startMs = Date.now();
+
+  const res = await fetch(`${baseUrl}/generate`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({
+      prompt,
+      max_new_tokens: maxNewTokens,
+      temperature,
+      do_sample: temperature > 0,
+    }),
+    signal: AbortSignal.timeout(timeoutMs),
+  });
+
+  if (!res.ok) {
+    const body = await res.text();
+    throw new Error(`remote-gpu ${res.status}: ${truncate(body, 200)}`);
+  }
+
+  const data = await res.json() as { generated_text: string; elapsed_sec?: number };
+  const ttftMs = Date.now() - startMs;
+  const rawBuffer = data.generated_text.trim();
+  const tokensPerSec = data.elapsed_sec ? maxNewTokens / data.elapsed_sec : undefined;
+
+  // Parse JSON from the generated text
+  const parsed = extractJSON(repairJSON(rawBuffer));
+
+  let emotion: Emotion = "neutral";
+  let motion: Motion = "none";
+  let accumulatedText = "";
+
+  if (parsed) {
+    emotion = isValidEmotion(parsed["emotion"]) ? parsed["emotion"] as Emotion : "neutral";
+    motion = isValidMotion(parsed["motion"]) ? parsed["motion"] as Motion : "none";
+    accumulatedText = typeof parsed["text"] === "string" ? parsed["text"].trim() : "";
+  }
+
+  // Emit events character-by-character to keep UI experience consistent
+  broadcast({ type: "render_start", emotion, motion });
+  for (const char of accumulatedText) {
+    broadcast({ type: "render_token", token: char });
+  }
+  broadcast({ type: "render_end" });
+
+  if (!accumulatedText) {
+    throw new Error("No text extracted from remote-gpu response");
+  }
+
+  log.debug("remote-gpu complete", { chars: accumulatedText.length, emotion, motion, tokensPerSec, ttftMs });
+  return { text: accumulatedText, emotion, motion, rawBuffer, tokensPerSec, ttftMs };
 }
 
 // ── Ollama streaming REST call ────────────────────────────────────────────────
