@@ -22,6 +22,7 @@ const statusBar   = document.getElementById("status-bar") as HTMLDivElement;
 const userInput   = document.getElementById("user-input") as HTMLInputElement;
 const sendBtn     = document.getElementById("send-btn") as HTMLButtonElement;
 const modelSelect = document.getElementById("model-select") as HTMLSelectElement;
+const modelLabel  = document.getElementById("model-label") as HTMLSpanElement;
 
 // ── Components ────────────────────────────────────────────────────────────────
 const avatar = new AvatarRenderer(canvas, 8);
@@ -45,7 +46,13 @@ async function loadModels() {
   try {
     const res = await fetch(`${bridgeBase}/models`);
     if (!res.ok) return;
-    const data = await res.json() as { current: string; available: string[] };
+    const data = await res.json() as { current: string; available: string[]; backend: string };
+    if (data.backend === "remote-gpu") {
+      modelSelect.style.display = "none";
+      modelLabel.style.display = "inline";
+      modelLabel.textContent = "remote-gpu";
+      return;
+    }
     modelSelect.innerHTML = "";
     for (const m of data.available) {
       const opt = document.createElement("option");

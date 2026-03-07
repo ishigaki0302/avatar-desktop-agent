@@ -65,8 +65,62 @@ ollama pull qwen3.5:2b
 ### 起動
 
 ```bash
-# bridge + UI を同時起動
+# bridge + UI を同時起動（ローカル Ollama 使用）
 pnpm dev
+```
+
+### リモート GPU バックエンドで起動する
+
+GPU サーバ上で `/generate` API を立てておき、SSH ポートフォワードでローカルに転送する方法です。
+
+#### 1. SSH ポートフォワードを張る
+
+別ターミナルで以下を実行し、GPU サーバのポートをローカル `10003` に転送します。
+
+```bash
+# ssh -L <ローカルポート>:<サーバ内ホスト>:<サーバポート> <SSHホスト>
+ssh -L 10003:localhost:10003 your-gpu-server
+```
+
+> `your-gpu-server` は `~/.ssh/config` のホスト名や `user@hostname` で指定してください。
+> サーバ側の `/generate` API がポート `10003` で起動している想定です。
+
+#### 2. アプリを起動する
+
+```bash
+BRAIN_BACKEND=remote-gpu REMOTE_GPU_BASE_URL=http://127.0.0.1:10003 pnpm dev
+```
+
+| 環境変数 | 説明 | デフォルト |
+|---------|------|-----------|
+| `BRAIN_BACKEND` | `ollama`（ローカル）または `remote-gpu` | `ollama` |
+| `REMOTE_GPU_BASE_URL` | `/generate` API のベース URL | `http://127.0.0.1:10003` |
+| `REMOTE_GPU_MAX_NEW_TOKENS` | 最大生成トークン数 | `512` |
+| `REMOTE_GPU_TEMPERATURE` | サンプリング温度 | `0.75` |
+| `REMOTE_GPU_TIMEOUT_MS` | タイムアウト（ms） | `120000` |
+
+#### `/generate` API の仕様
+
+GPU サーバ側は以下のリクエスト／レスポンスに対応している必要があります。
+
+**リクエスト（POST `/generate`）**
+
+```json
+{
+  "prompt": "<システムプロンプト + 会話履歴>",
+  "max_new_tokens": 512,
+  "temperature": 0.75,
+  "do_sample": true
+}
+```
+
+**レスポンス**
+
+```json
+{
+  "generated_text": "{\"emotion\":\"happy\",\"motion\":\"wave\",\"text\":\"...\",\"memory_update\":\"NOOP\",\"task\":null}",
+  "elapsed_sec": 1.23
+}
 ```
 
 ### 送信キー
