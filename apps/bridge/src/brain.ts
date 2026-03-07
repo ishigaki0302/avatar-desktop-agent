@@ -376,12 +376,9 @@ async function callRemoteGpuResponse(
     accumulatedText = typeof parsed["text"] === "string" ? parsed["text"].trim() : "";
   }
 
-  // Emit events character-by-character to keep UI experience consistent
-  broadcast({ type: "render_start", emotion, motion });
-  for (const char of accumulatedText) {
-    broadcast({ type: "render_token", token: char });
-  }
-  broadcast({ type: "render_end" });
+  // Use render event (not streaming events) so typewriter.play() handles
+  // character-by-character timing and lipsync on the renderer side.
+  broadcast({ type: "render", emotion, motion, text: accumulatedText });
 
   if (!accumulatedText) {
     throw new Error("No text extracted from remote-gpu response");
