@@ -57,7 +57,7 @@ export async function startServer(session?: SessionLogger) {
 
   // ── Models ──────────────────────────────────────────────────────────────────
   app.get("/models", async (_req, reply) => {
-    return reply.send({ current: getCurrentModel(), available: config.ollama.availableModels });
+    return reply.send({ current: getCurrentModel(), available: config.ollama.availableModels, backend: config.brainBackend });
   });
 
   app.post<{ Body: { model: string } }>("/model", {
