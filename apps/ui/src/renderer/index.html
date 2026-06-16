@@ -115,6 +115,26 @@
     }
     #send-btn:hover { background: #5a8fe8; }
     #send-btn:disabled { background: #aaa; cursor: not-allowed; }
+
+    #feedback-bar {
+      display: flex;
+      gap: 6px;
+      justify-content: center;
+      min-height: 26px;
+      margin-top: 4px;
+    }
+    #feedback-bar button {
+      border: none;
+      border-radius: 14px;
+      padding: 3px 10px;
+      font-size: 13px;
+      cursor: pointer;
+      background: rgba(255,255,255,0.85);
+      transition: background 0.15s;
+    }
+    #feedback-bar button:hover { background: #fff; }
+    #feedback-bar button:disabled { opacity: 0.5; cursor: default; }
+    #feedback-bar .thanks { font-size: 12px; color: #5a8fe8; align-self: center; }
   </style>
 </head>
 <body>
@@ -126,6 +146,7 @@
     </div>
     <div id="status-bar"></div>
     <div id="speech-bubble">...</div>
+    <div id="feedback-bar"></div>
     <div id="input-area">
       <input id="user-input" type="text" placeholder="話しかけてみてください..." maxlength="400" />
       <button id="send-btn">送信</button>

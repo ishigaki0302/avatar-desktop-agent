@@ -18,5 +18,9 @@ class Settings(BaseSettings):
     ollama_timeout_ms: int = 120_000
     storage_dir: str = "./storage"
 
+    # Memory retrieval embeddings (Phase 13). "hash" = offline/deterministic default.
+    embedding_backend: str = "hash"  # "hash" | "ollama"
+    embedding_model: str = "embeddinggemma"
+
 
 settings = Settings()
