@@ -17,6 +17,8 @@ class Settings(BaseSettings):
     ollama_model: str = "gemma4:31b"
     ollama_timeout_ms: int = 120_000
     storage_dir: str = "./storage"
+    # Root directory that filesystem tools (Phase 17) may list/read within.
+    tools_root: str = "."
 
     # Memory retrieval embeddings (Phase 13). "hash" = offline/deterministic default.
     embedding_backend: str = "hash"  # "hash" | "ollama"
