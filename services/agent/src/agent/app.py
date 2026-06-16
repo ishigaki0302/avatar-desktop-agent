@@ -6,7 +6,7 @@ from functools import lru_cache
 from pathlib import Path
 from typing import Annotated
 
-from fastapi import Depends, FastAPI, HTTPException, status
+from fastapi import Depends, FastAPI, HTTPException, Query, status
 from pydantic import BaseModel
 
 from agent.config import settings
@@ -20,6 +20,8 @@ from agent.logger.interaction_logger import (
     ToolCallLog,
     TurnLog,
 )
+from agent.memory.profile import ProfileStore
+from agent.memory.store import Memory, MemoryStore, MemoryType, Task, TaskStatus
 
 app = FastAPI(title="avatar-agent", version="0.1.0")
 
@@ -31,6 +33,24 @@ def get_logger() -> InteractionLogger:
 
 
 LoggerDep = Annotated[InteractionLogger, Depends(get_logger)]
+
+
+@lru_cache
+def get_memory_store() -> MemoryStore:
+    """Return the process-wide long-term memory store (created on first use)."""
+    return MemoryStore(Path(settings.storage_dir) / "app.sqlite")
+
+
+MemoryStoreDep = Annotated[MemoryStore, Depends(get_memory_store)]
+
+
+@lru_cache
+def get_profile_store() -> ProfileStore:
+    """Return the process-wide profile store (storage/memory/profile.md)."""
+    return ProfileStore(Path(settings.storage_dir) / "memory" / "profile.md")
+
+
+ProfileStoreDep = Annotated[ProfileStore, Depends(get_profile_store)]
 
 
 class StartSessionRequest(BaseModel):
@@ -61,6 +81,39 @@ class FeedbackRequest(BaseModel):
     rating: int | None = None
     label: str | None = None
     comment: str | None = None
+
+
+class CreateMemoryRequest(BaseModel):
+    type: MemoryType
+    content: str
+    source: str | None = None
+    importance: int = 3
+    metadata: dict[str, object] | None = None
+
+
+class UpdateMemoryRequest(BaseModel):
+    content: str | None = None
+    importance: int | None = None
+    source: str | None = None
+    metadata: dict[str, object] | None = None
+
+
+class CreateTaskRequest(BaseModel):
+    title: str
+    status: TaskStatus = "todo"
+    due_date: str | None = None
+    content: str | None = None
+
+
+class UpdateTaskRequest(BaseModel):
+    title: str | None = None
+    status: TaskStatus | None = None
+    due_date: str | None = None
+    content: str | None = None
+
+
+class ProfileRequest(BaseModel):
+    content: str
 
 
 @app.get("/health")
@@ -160,3 +213,96 @@ def post_feedback(turn_id: str, req: FeedbackRequest, logger: LoggerDep) -> Expl
 @app.get("/turns/{turn_id}/feedback")
 def get_feedback(turn_id: str, logger: LoggerDep) -> list[ExplicitFeedbackLog]:
     return logger.get_feedback(turn_id)
+
+
+# ── Phase 12: long-term memory (memories / tasks / profile) ────────────────────
+
+
+@app.post("/memories", status_code=status.HTTP_201_CREATED)
+def create_memory(req: CreateMemoryRequest, store: MemoryStoreDep) -> Memory:
+    return store.add_memory(
+        req.type,
+        req.content,
+        source=req.source,
+        importance=req.importance,
+        metadata=req.metadata,
+    )
+
+
+@app.get("/memories")
+def search_memories(
+    store: MemoryStoreDep,
+    q: str | None = None,
+    memory_type: Annotated[MemoryType | None, Query(alias="type")] = None,
+    limit: int = 20,
+) -> list[Memory]:
+    return store.search_memories(q, memory_type=memory_type, limit=limit)
+
+
+@app.get("/memories/{memory_id}")
+def get_memory(memory_id: str, store: MemoryStoreDep) -> Memory:
+    memory = store.get_memory(memory_id)
+    if memory is None:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="memory not found")
+    return memory
+
+
+@app.patch("/memories/{memory_id}")
+def update_memory(memory_id: str, req: UpdateMemoryRequest, store: MemoryStoreDep) -> Memory:
+    updated = store.update_memory(
+        memory_id,
+        content=req.content,
+        importance=req.importance,
+        source=req.source,
+        metadata=req.metadata,
+    )
+    if updated is None:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="memory not found")
+    return updated
+
+
+@app.post("/memories/{memory_id}/supersede")
+def supersede_memory(memory_id: str, store: MemoryStoreDep) -> Memory:
+    store.supersede_memory(memory_id)
+    memory = store.get_memory(memory_id)
+    if memory is None:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="memory not found")
+    return memory
+
+
+@app.post("/tasks", status_code=status.HTTP_201_CREATED)
+def create_task(req: CreateTaskRequest, store: MemoryStoreDep) -> Task:
+    return store.add_task(req.title, status=req.status, due_date=req.due_date, content=req.content)
+
+
+@app.get("/tasks")
+def list_tasks(
+    store: MemoryStoreDep,
+    task_status: Annotated[TaskStatus | None, Query(alias="status")] = None,
+) -> list[Task]:
+    return store.list_tasks(status=task_status)
+
+
+@app.patch("/tasks/{task_id}")
+def update_task(task_id: str, req: UpdateTaskRequest, store: MemoryStoreDep) -> Task:
+    updated = store.update_task(
+        task_id,
+        title=req.title,
+        status=req.status,
+        due_date=req.due_date,
+        content=req.content,
+    )
+    if updated is None:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="task not found")
+    return updated
+
+
+@app.get("/profile")
+def get_profile(profile: ProfileStoreDep) -> dict[str, str]:
+    return {"content": profile.read()}
+
+
+@app.put("/profile")
+def put_profile(req: ProfileRequest, profile: ProfileStoreDep) -> dict[str, str]:
+    profile.write(req.content)
+    return {"content": profile.read()}
