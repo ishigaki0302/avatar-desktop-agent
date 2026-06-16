@@ -7,11 +7,19 @@ from pathlib import Path
 from typing import Annotated
 
 from fastapi import Depends, FastAPI, HTTPException, Query, status
+from fastapi.responses import HTMLResponse
 from pydantic import BaseModel
 
 from agent.analytics.analyzer import Analyzer, LLMAnalyzer, RuleAnalyzer
 from agent.analytics.store import AnalyticsStore, InferredFeedbackLog
 from agent.config import settings
+from agent.dashboard import (
+    Dashboard,
+    DashboardStats,
+    DissatisfactionEntry,
+    SessionDetail,
+    SessionOverview,
+)
 from agent.logger.interaction_logger import (
     AvatarEventLog,
     ExplicitFeedbackLog,
@@ -93,6 +101,15 @@ def get_analyzer() -> Analyzer:
 
 
 AnalyzerDep = Annotated[Analyzer, Depends(get_analyzer)]
+
+
+@lru_cache
+def get_dashboard() -> Dashboard:
+    """Return the process-wide dashboard aggregator (created on first use)."""
+    return Dashboard(Path(settings.storage_dir) / "app.sqlite")
+
+
+DashboardDep = Annotated[Dashboard, Depends(get_dashboard)]
 
 
 class StartSessionRequest(BaseModel):
@@ -445,3 +462,111 @@ def get_inferred_feedback(turn_id: str, analytics: AnalyticsStoreDep) -> list[In
 @app.get("/analytics/issue-types")
 def get_issue_type_counts(analytics: AnalyticsStoreDep) -> dict[str, int]:
     return analytics.issue_type_counts()
+
+
+# ── Phase 16: dashboard (read-only aggregation + simple UI) ────────────────────
+
+
+@app.get("/dashboard/sessions")
+def dashboard_sessions(dashboard: DashboardDep) -> list[SessionOverview]:
+    return dashboard.list_sessions()
+
+
+@app.get("/dashboard/sessions/{session_id}")
+def dashboard_session_detail(session_id: str, dashboard: DashboardDep) -> SessionDetail:
+    detail = dashboard.session_detail(session_id)
+    if detail is None:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="session not found")
+    return detail
+
+
+@app.get("/dashboard/search")
+def dashboard_search(dashboard: DashboardDep, q: str, limit: int = 50) -> list[TurnLog]:
+    return dashboard.search_turns(q, limit=limit)
+
+
+@app.get("/dashboard/dissatisfaction")
+def dashboard_dissatisfaction(dashboard: DashboardDep, limit: int = 50) -> list[DissatisfactionEntry]:
+    return dashboard.dissatisfaction(limit=limit)
+
+
+@app.get("/dashboard/stats")
+def dashboard_stats(dashboard: DashboardDep) -> DashboardStats:
+    return dashboard.stats()
+
+
+@app.get("/dashboard", response_class=HTMLResponse)
+def dashboard_page() -> str:
+    return _DASHBOARD_HTML
+
+
+_DASHBOARD_HTML = """<!doctype html>
+<html lang="ja">
+<head>
+<meta charset="utf-8">
+<title>avatar-agent dashboard</title>
+<style>
+  body { font-family: system-ui, sans-serif; margin: 24px; max-width: 920px; color: #222; }
+  h1 { font-size: 20px; } h2 { font-size: 16px; margin-top: 28px; }
+  .stat { display: inline-block; background: #f0f4ff; border-radius: 8px; padding: 8px 12px; margin: 4px; }
+  table { border-collapse: collapse; width: 100%; font-size: 13px; }
+  th, td { border: 1px solid #ddd; padding: 6px 8px; text-align: left; }
+  .bad { color: #c0392b; } input { padding: 6px; } button { padding: 6px 12px; }
+</style>
+</head>
+<body>
+<h1>avatar-agent dashboard</h1>
+<div id="stats"></div>
+
+<h2>セッション</h2>
+<table id="sessions"><thead><tr>
+  <th>started</th><th>model</th><th>turns</th><th>avg latency(ms)</th><th>avg satisfaction</th>
+</tr></thead><tbody></tbody></table>
+
+<h2>不満ログ</h2>
+<table id="dissat"><thead><tr>
+  <th>issue</th><th>satisfaction</th><th>user_input</th><th>evidence</th>
+</tr></thead><tbody></tbody></table>
+
+<h2>会話検索</h2>
+<input id="q" placeholder="キーワード"><button id="searchBtn">検索</button>
+<table id="results"><thead><tr><th>timestamp</th><th>user</th><th>assistant</th></tr></thead><tbody></tbody></table>
+
+<script>
+const fmt = (v) => (v == null ? "-" : (typeof v === "number" ? v.toFixed(2) : v));
+async function getJSON(url) { const r = await fetch(url); return r.ok ? r.json() : null; }
+function rows(tableId, items, cols) {
+  const tb = document.querySelector(`#${tableId} tbody`);
+  tb.innerHTML = "";
+  for (const it of items) {
+    const tr = document.createElement("tr");
+    for (const c of cols) { const td = document.createElement("td"); td.textContent = fmt(it[c]); tr.appendChild(td); }
+    tb.appendChild(tr);
+  }
+}
+async function load() {
+  const s = await getJSON("/dashboard/stats");
+  if (s) {
+    document.getElementById("stats").innerHTML =
+      [["sessions", s.session_count], ["turns", s.turn_count],
+       ["avg latency(ms)", fmt(s.avg_latency_ms)], ["avg satisfaction", fmt(s.avg_satisfaction)],
+       ["tool success", fmt(s.tool_success_rate)], ["memory accesses", s.memory_access_count]]
+      .map(([k, v]) => `<span class="stat">${k}: <b>${v}</b></span>`).join("") +
+      "<div>issue types: " + JSON.stringify(s.issue_type_counts) + "</div>";
+  }
+  rows("sessions", (await getJSON("/dashboard/sessions")) || [],
+       ["started_at", "model", "turn_count", "avg_latency_ms", "avg_satisfaction"]);
+  rows("dissat", (await getJSON("/dashboard/dissatisfaction")) || [],
+       ["issue_type", "predicted_satisfaction", "user_input", "evidence"]);
+}
+document.getElementById("searchBtn").addEventListener("click", async () => {
+  const q = document.getElementById("q").value.trim();
+  if (!q) return;
+  rows("results", (await getJSON("/dashboard/search?q=" + encodeURIComponent(q))) || [],
+       ["timestamp", "user_input", "assistant_output"]);
+});
+load();
+</script>
+</body>
+</html>
+"""
