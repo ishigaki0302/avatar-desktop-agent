@@ -23,3 +23,7 @@ __pycache__/
 *.sqlite
 *.sqlite-journal
 *.sqlite-wal
+
+# Runtime storage dirs created when dev processes run from subdirectories
+apps/*/storage/
+services/*/storage/

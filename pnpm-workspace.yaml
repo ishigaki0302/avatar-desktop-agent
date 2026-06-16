@@ -1,3 +1,11 @@
 packages:
   - 'apps/*'
   - 'packages/*'
+
+# Allow these deps to run install/build scripts (electron downloads its binary,
+# esbuild its own).
+# - pnpm 10+ (local): reads `allowBuilds` from here.
+# - pnpm 9 (CI): reads the same list from package.json's "pnpm.onlyBuiltDependencies".
+allowBuilds:
+  electron: true
+  esbuild: true
