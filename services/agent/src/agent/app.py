@@ -23,6 +23,7 @@ from agent.logger.interaction_logger import (
 from agent.memory.profile import ProfileStore
 from agent.memory.retrieval import MemoryRetriever, ScoredMemory, build_context
 from agent.memory.store import Memory, MemoryStore, MemoryType, Task, TaskStatus
+from agent.memory.writer import LLMExtractor, MemoryWriter
 
 app = FastAPI(title="avatar-agent", version="0.1.0")
 
@@ -61,6 +62,15 @@ def get_retriever() -> MemoryRetriever:
 
 
 RetrieverDep = Annotated[MemoryRetriever, Depends(get_retriever)]
+
+
+@lru_cache
+def get_memory_writer() -> MemoryWriter:
+    """Return the process-wide memory writer (created on first use)."""
+    return MemoryWriter(get_memory_store())
+
+
+MemoryWriterDep = Annotated[MemoryWriter, Depends(get_memory_writer)]
 
 
 class StartSessionRequest(BaseModel):
@@ -136,6 +146,16 @@ class RetrieveRequest(BaseModel):
 class RetrieveResponse(BaseModel):
     results: list[ScoredMemory]
     context: str
+
+
+class ExplicitWriteRequest(BaseModel):
+    text: str
+    turn_id: str | None = None
+
+
+class ExtractRequest(BaseModel):
+    conversation: str
+    turn_id: str | None = None
 
 
 @app.get("/health")
@@ -349,3 +369,28 @@ def retrieve_memories(
     )
     open_tasks = [*store.list_tasks(status="todo"), *store.list_tasks(status="in_progress")]
     return RetrieveResponse(results=results, context=build_context(results, open_tasks))
+
+
+# ── Phase 14: memory write / consolidation ─────────────────────────────────────
+
+
+@app.post("/memory-write/explicit")
+def write_explicit(req: ExplicitWriteRequest, writer: MemoryWriterDep, logger: LoggerDep) -> Memory | None:
+    return writer.write_explicit(
+        req.text,
+        logger=logger if req.turn_id else None,
+        turn_id=req.turn_id,
+    )
+
+
+@app.post("/memory-write/consolidate")
+def consolidate_memories(writer: MemoryWriterDep) -> dict[str, int]:
+    return {"merged": writer.consolidate_duplicates()}
+
+
+@app.post("/memory-write/extract")
+def extract_and_write(req: ExtractRequest, writer: MemoryWriterDep, logger: LoggerDep) -> list[Memory]:
+    # Uses the LLM extractor (requires Ollama); returns [] best-effort if unavailable.
+    extractor = LLMExtractor(settings.ollama_base_url, settings.ollama_model)
+    ops = extractor.extract(req.conversation)
+    return writer.apply(ops, logger=logger if req.turn_id else None, turn_id=req.turn_id)
