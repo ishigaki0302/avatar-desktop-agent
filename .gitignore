@@ -10,3 +10,11 @@ coverage/
 storage/memory/episodes/*.md
 .npmrc.tmp
 CLAUDE.md
+
+# Python (services/agent) — uv.lock is intentionally tracked for reproducible CI
+__pycache__/
+*.py[cod]
+.venv/
+.pytest_cache/
+.ruff_cache/
+*.egg-info/

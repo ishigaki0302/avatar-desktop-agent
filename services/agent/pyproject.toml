@@ -1,0 +1,70 @@
+[project]
+name = "avatar-agent"
+version = "0.1.0"
+description = "Python backend for avatar-desktop-agent: LLM orchestration, long-term memory, interaction logging, analytics, and tools."
+readme = "README.md"
+requires-python = ">=3.12"
+dependencies = [
+    "fastapi>=0.115.0",
+    "uvicorn>=0.32.0",
+    "httpx>=0.27.0",
+    "pydantic>=2.0.0",
+    "pydantic-settings>=2.4.0",
+    "python-dotenv>=1.0.0",
+]
+
+[dependency-groups]
+dev = ["ruff", "pytest", "pytest-md-report"]
+
+[build-system]
+requires = ["setuptools"]
+build-backend = "setuptools.build_meta"
+
+[tool.setuptools.packages.find]
+where = ["src"]
+
+[tool.pytest.ini_options]
+python_files = ["test_*.py", "*_test.py"]
+testpaths = ["tests"]
+
+[tool.ruff]
+target-version = "py312"
+line-length = 120
+
+[tool.ruff.lint]
+pydocstyle.convention = "google"
+# static code analysis rules
+select = ["ALL"]
+
+# Rule definition: https://docs.astral.sh/ruff/rules/
+ignore = [
+    "ANN003",  # kwargs without type check
+    "COM812",  # conflicts when used with the formatter
+    "D",       # allow Missing docstring
+    "EM101",   # allow strings in exceptions
+    "EM102",   # allow using an f-string literal in exceptions
+    "FBT",     # flake8-boolean-trap
+    "ISC001",  # single-line-implicit-string-concatenation produces conflicts
+    "PERF203", # allow try except in loop
+    "PTH123",  # allow builtin open
+    "T201",    # allow print
+    "TRY003",  # allow text messages in try
+    "TRY300",  # do not enforce try-else
+    "TRY301",  # allow raise in try
+    "PLR0913", # allow long argument lists
+]
+unfixable = [
+    "S", # do not auto fix security related findings
+]
+
+[tool.ruff.lint.mccabe]
+max-complexity = 20
+
+[tool.ruff.lint.per-file-ignores]
+"**/*_test.py" = [
+    "S",       # ignore security related warnings in tests
+    "C",       # ignore various C categories in tests
+    "ANN",     # ignore some type annotation checks in tests
+    "PLR2004", # ignore magic number compare
+    "INP001",  # tests dir is not a package
+]

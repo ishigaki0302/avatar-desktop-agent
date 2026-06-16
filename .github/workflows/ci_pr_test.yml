@@ -1,0 +1,35 @@
+name: Tests (pytest + tsx)
+
+on: [pull_request]
+
+jobs:
+  python-tests:
+    name: Python tests (pytest)
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: services/agent
+    steps:
+      - uses: actions/checkout@v4
+      - name: Install uv
+        uses: astral-sh/setup-uv@v5
+        with:
+          python-version: "3.12"
+      - run: uv sync --group dev --frozen
+      - name: pytest
+        run: uv run pytest -v
+
+  ts-tests:
+    name: TypeScript tests (tsx --test)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: pnpm/action-setup@v4
+        with:
+          version: 9
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: pnpm
+      - run: pnpm install --frozen-lockfile
+      - run: pnpm test
