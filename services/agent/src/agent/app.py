@@ -9,6 +9,8 @@ from typing import Annotated
 from fastapi import Depends, FastAPI, HTTPException, Query, status
 from pydantic import BaseModel
 
+from agent.analytics.analyzer import Analyzer, LLMAnalyzer, RuleAnalyzer
+from agent.analytics.store import AnalyticsStore, InferredFeedbackLog
 from agent.config import settings
 from agent.logger.interaction_logger import (
     AvatarEventLog,
@@ -71,6 +73,26 @@ def get_memory_writer() -> MemoryWriter:
 
 
 MemoryWriterDep = Annotated[MemoryWriter, Depends(get_memory_writer)]
+
+
+@lru_cache
+def get_analytics_store() -> AnalyticsStore:
+    """Return the process-wide analytics store (created on first use)."""
+    return AnalyticsStore(Path(settings.storage_dir) / "app.sqlite")
+
+
+AnalyticsStoreDep = Annotated[AnalyticsStore, Depends(get_analytics_store)]
+
+
+@lru_cache
+def get_analyzer() -> Analyzer:
+    """Return the configured analyzer (rule by default, ollama when requested)."""
+    if settings.analytics_backend == "ollama":
+        return LLMAnalyzer(settings.ollama_base_url, settings.ollama_model)
+    return RuleAnalyzer()
+
+
+AnalyzerDep = Annotated[Analyzer, Depends(get_analyzer)]
 
 
 class StartSessionRequest(BaseModel):
@@ -156,6 +178,11 @@ class ExplicitWriteRequest(BaseModel):
 class ExtractRequest(BaseModel):
     conversation: str
     turn_id: str | None = None
+
+
+class AnalyzeRequest(BaseModel):
+    user_input: str
+    latency_ms: int | None = None
 
 
 @app.get("/health")
@@ -394,3 +421,27 @@ def extract_and_write(req: ExtractRequest, writer: MemoryWriterDep, logger: Logg
     extractor = LLMExtractor(settings.ollama_base_url, settings.ollama_model)
     ops = extractor.extract(req.conversation)
     return writer.apply(ops, logger=logger if req.turn_id else None, turn_id=req.turn_id)
+
+
+# ── Phase 15: interaction analytics ────────────────────────────────────────────
+
+
+@app.post("/turns/{turn_id}/analyze", status_code=status.HTTP_201_CREATED)
+def analyze_turn(
+    turn_id: str,
+    req: AnalyzeRequest,
+    analyzer: AnalyzerDep,
+    analytics: AnalyticsStoreDep,
+) -> InferredFeedbackLog:
+    analysis = analyzer.analyze(req.user_input, latency_ms=req.latency_ms)
+    return analytics.record(turn_id, analysis)
+
+
+@app.get("/turns/{turn_id}/inferred-feedback")
+def get_inferred_feedback(turn_id: str, analytics: AnalyticsStoreDep) -> list[InferredFeedbackLog]:
+    return analytics.get_for_turn(turn_id)
+
+
+@app.get("/analytics/issue-types")
+def get_issue_type_counts(analytics: AnalyticsStoreDep) -> dict[str, int]:
+    return analytics.issue_type_counts()

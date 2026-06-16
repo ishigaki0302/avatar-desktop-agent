@@ -22,5 +22,8 @@ class Settings(BaseSettings):
     embedding_backend: str = "hash"  # "hash" | "ollama"
     embedding_model: str = "embeddinggemma"
 
+    # Interaction analytics (Phase 15). "rule" = offline/deterministic default.
+    analytics_backend: str = "rule"  # "rule" | "ollama"
+
 
 settings = Settings()
