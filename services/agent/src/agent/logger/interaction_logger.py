@@ -12,7 +12,7 @@ from datetime import UTC, datetime
 from typing import TYPE_CHECKING, Literal
 from uuid import uuid4
 
-from pydantic import BaseModel
+from pydantic import BaseModel, Field
 
 from agent.logger.db import connect, init_db
 
@@ -63,7 +63,16 @@ INSERT INTO avatar_event_logs
 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
 """
 
+_INSERT_FEEDBACK = """
+INSERT INTO explicit_feedback_logs
+  (id, turn_id, rating, label, comment, created_at)
+VALUES (?, ?, ?, ?, ?, ?)
+"""
+
 AccessType = Literal["read", "write", "update", "delete", "supersede"]
+
+_RATING_MIN = 1
+_RATING_MAX = 5
 
 
 def _now_iso() -> str:
@@ -161,6 +170,17 @@ class AvatarEventLog(BaseModel):
     tts_text: str | None = None
     started_at: str | None = None
     ended_at: str | None = None
+    created_at: str
+
+
+class ExplicitFeedbackLog(BaseModel):
+    """User-supplied feedback on a turn (👍/👎 plus optional label/comment)."""
+
+    id: str
+    turn_id: str
+    rating: int | None = Field(default=None, ge=_RATING_MIN, le=_RATING_MAX)
+    label: str | None = None
+    comment: str | None = None
     created_at: str
 
 
@@ -477,3 +497,43 @@ class InteractionLogger:
                 (turn_id,),
             ).fetchall()
         return [AvatarEventLog(**dict(row)) for row in rows]
+
+    # ── Phase 11: explicit feedback ────────────────────────────────────────────
+
+    def log_explicit_feedback(
+        self,
+        turn_id: str,
+        *,
+        rating: int | None = None,
+        label: str | None = None,
+        comment: str | None = None,
+    ) -> ExplicitFeedbackLog:
+        feedback = ExplicitFeedbackLog(
+            id=_new_id(),
+            turn_id=turn_id,
+            rating=rating,
+            label=label,
+            comment=comment,
+            created_at=_now_iso(),
+        )
+        with closing(connect(self._db_path)) as conn, conn:
+            conn.execute(
+                _INSERT_FEEDBACK,
+                (
+                    feedback.id,
+                    feedback.turn_id,
+                    feedback.rating,
+                    feedback.label,
+                    feedback.comment,
+                    feedback.created_at,
+                ),
+            )
+        return feedback
+
+    def get_feedback(self, turn_id: str) -> list[ExplicitFeedbackLog]:
+        with closing(connect(self._db_path)) as conn:
+            rows = conn.execute(
+                "SELECT * FROM explicit_feedback_logs WHERE turn_id = ? ORDER BY created_at",
+                (turn_id,),
+            ).fetchall()
+        return [ExplicitFeedbackLog(**dict(row)) for row in rows]

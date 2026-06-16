@@ -12,6 +12,7 @@ from pydantic import BaseModel
 from agent.config import settings
 from agent.logger.interaction_logger import (
     AvatarEventLog,
+    ExplicitFeedbackLog,
     InteractionLogger,
     MemoryAccessLog,
     PromptLog,
@@ -54,6 +55,12 @@ class LogTurnRequest(BaseModel):
 
 class EndSessionRequest(BaseModel):
     summary: str | None = None
+
+
+class FeedbackRequest(BaseModel):
+    rating: int | None = None
+    label: str | None = None
+    comment: str | None = None
 
 
 @app.get("/health")
@@ -135,3 +142,21 @@ def get_memory_accesses(turn_id: str, logger: LoggerDep) -> list[MemoryAccessLog
 @app.get("/turns/{turn_id}/avatar-events")
 def get_avatar_events(turn_id: str, logger: LoggerDep) -> list[AvatarEventLog]:
     return logger.get_avatar_events(turn_id)
+
+
+# ── Phase 11: explicit feedback ────────────────────────────────────────────────
+
+
+@app.post("/turns/{turn_id}/feedback", status_code=status.HTTP_201_CREATED)
+def post_feedback(turn_id: str, req: FeedbackRequest, logger: LoggerDep) -> ExplicitFeedbackLog:
+    return logger.log_explicit_feedback(
+        turn_id,
+        rating=req.rating,
+        label=req.label,
+        comment=req.comment,
+    )
+
+
+@app.get("/turns/{turn_id}/feedback")
+def get_feedback(turn_id: str, logger: LoggerDep) -> list[ExplicitFeedbackLog]:
+    return logger.get_feedback(turn_id)

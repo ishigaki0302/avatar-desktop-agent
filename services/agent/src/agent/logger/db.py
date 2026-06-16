@@ -98,7 +98,18 @@ CREATE TABLE IF NOT EXISTS avatar_event_logs (
 CREATE INDEX IF NOT EXISTS idx_prompt_logs_turn ON prompt_logs (turn_id);
 CREATE INDEX IF NOT EXISTS idx_tool_call_logs_turn ON tool_call_logs (turn_id);
 CREATE INDEX IF NOT EXISTS idx_memory_access_logs_turn ON memory_access_logs (turn_id);
+CREATE TABLE IF NOT EXISTS explicit_feedback_logs (
+  id         TEXT PRIMARY KEY,
+  turn_id    TEXT NOT NULL,
+  rating     INTEGER,
+  label      TEXT,
+  comment    TEXT,
+  created_at TEXT NOT NULL,
+  FOREIGN KEY (turn_id) REFERENCES turn_logs (id)
+);
+
 CREATE INDEX IF NOT EXISTS idx_avatar_event_logs_turn ON avatar_event_logs (turn_id);
+CREATE INDEX IF NOT EXISTS idx_explicit_feedback_logs_turn ON explicit_feedback_logs (turn_id);
 """
 
 
