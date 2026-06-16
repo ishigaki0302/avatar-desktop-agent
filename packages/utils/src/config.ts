@@ -35,7 +35,7 @@ export const config = {
   },
   // Python agent service (FastAPI): interaction logging / feedback / analytics
   agentService: {
-    baseUrl: env("AGENT_SERVICE_URL", "http://127.0.0.1:8000"),
+    baseUrl: env("AGENT_SERVICE_URL", "http://127.0.0.1:8123"),
   },
   bridge: {
     port: envInt("BRIDGE_PORT", 3000),

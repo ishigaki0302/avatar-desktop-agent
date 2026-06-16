@@ -5,7 +5,7 @@
   "description": "Desktop companion with sprite avatar, Ollama LLM, and OpenClaw desktop automation",
   "scripts": {
     "dev": "concurrently --names \"bridge,ui\" --prefix-colors \"cyan,magenta\" --kill-others-on-fail \"pnpm --filter bridge dev\" \"pnpm --filter ui dev\"",
-    "dev:agent": "uv run --directory services/agent uvicorn agent.app:app --port 8000",
+    "dev:agent": "uv run --directory services/agent uvicorn agent.app:app --port 8123",
     "dev:all": "concurrently --names \"agent,bridge,ui\" --prefix-colors \"green,cyan,magenta\" \"pnpm dev:agent\" \"pnpm --filter bridge dev\" \"pnpm --filter ui dev\"",
     "build": "pnpm -r build",
     "test": "pnpm -r test",
