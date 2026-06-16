@@ -21,6 +21,7 @@ from agent.logger.interaction_logger import (
     TurnLog,
 )
 from agent.memory.profile import ProfileStore
+from agent.memory.retrieval import MemoryRetriever, ScoredMemory, build_context
 from agent.memory.store import Memory, MemoryStore, MemoryType, Task, TaskStatus
 
 app = FastAPI(title="avatar-agent", version="0.1.0")
@@ -51,6 +52,15 @@ def get_profile_store() -> ProfileStore:
 
 
 ProfileStoreDep = Annotated[ProfileStore, Depends(get_profile_store)]
+
+
+@lru_cache
+def get_retriever() -> MemoryRetriever:
+    """Return the process-wide memory retriever (created on first use)."""
+    return MemoryRetriever(Path(settings.storage_dir) / "app.sqlite", get_memory_store())
+
+
+RetrieverDep = Annotated[MemoryRetriever, Depends(get_retriever)]
 
 
 class StartSessionRequest(BaseModel):
@@ -114,6 +124,18 @@ class UpdateTaskRequest(BaseModel):
 
 class ProfileRequest(BaseModel):
     content: str
+
+
+class RetrieveRequest(BaseModel):
+    query: str
+    limit: int = 5
+    min_score: float = 0.0
+    turn_id: str | None = None
+
+
+class RetrieveResponse(BaseModel):
+    results: list[ScoredMemory]
+    context: str
 
 
 @app.get("/health")
@@ -306,3 +328,24 @@ def get_profile(profile: ProfileStoreDep) -> dict[str, str]:
 def put_profile(req: ProfileRequest, profile: ProfileStoreDep) -> dict[str, str]:
     profile.write(req.content)
     return {"content": profile.read()}
+
+
+# ── Phase 13: memory retrieval ─────────────────────────────────────────────────
+
+
+@app.post("/retrieve")
+def retrieve_memories(
+    req: RetrieveRequest,
+    store: MemoryStoreDep,
+    retriever: RetrieverDep,
+    logger: LoggerDep,
+) -> RetrieveResponse:
+    results = retriever.retrieve(
+        req.query,
+        limit=req.limit,
+        min_score=req.min_score,
+        logger=logger if req.turn_id else None,
+        turn_id=req.turn_id,
+    )
+    open_tasks = [*store.list_tasks(status="todo"), *store.list_tasks(status="in_progress")]
+    return RetrieveResponse(results=results, context=build_context(results, open_tasks))
