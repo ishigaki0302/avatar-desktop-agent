@@ -21,9 +21,10 @@ export const config = {
   brainBackend: env("BRAIN_BACKEND", "ollama") as "ollama" | "remote-gpu",
   ollama: {
     baseUrl:          env("OLLAMA_BASE_URL", "http://localhost:11434"),
-    model:            env("OLLAMA_MODEL", "qwen3.5:2b"),
-    availableModels:  env("OLLAMA_AVAILABLE_MODELS", "qwen3.5:2b").split(",") as string[],
-    timeoutMs:        envInt("OLLAMA_TIMEOUT_MS", 60_000),
+    model:            env("OLLAMA_MODEL", "gemma4:31b"),
+    availableModels:  env("OLLAMA_AVAILABLE_MODELS", "gemma4:31b").split(",") as string[],
+    // 31B はコールドロード（VRAM 展開）に十数秒かかるため余裕を持たせる
+    timeoutMs:        envInt("OLLAMA_TIMEOUT_MS", 120_000),
     maxPredictTokens: envInt("OLLAMA_MAX_PREDICT", 512),
   },
   remoteGpu: {

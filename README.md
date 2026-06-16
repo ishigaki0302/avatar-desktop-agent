@@ -1,6 +1,6 @@
 # avatar-desktop-agent
 
-ローカル LLM（Ollama / qwen3.5:2b）で会話しつつ、OpenClaw をデスクトップ操作エンジンとして使い、
+ローカル LLM（Ollama / gemma4:31b）で会話しつつ、OpenClaw をデスクトップ操作エンジンとして使い、
 2D スプライト差し替えで表情・口パク・簡易モーションを表示する **デスクトップコンパニオン** です。
 
 キャラクター「アリス」は音声対話を前提とした短文（1文 15〜40 字）を生成し、
@@ -47,7 +47,7 @@ avatar-desktop-agent/
 
 - Node.js 22+
 - pnpm 9+
-- [Ollama](https://ollama.com/) インストール済み・`qwen3.5:2b` pull 済み
+- [Ollama](https://ollama.com/) インストール済み・`gemma4:31b` pull 済み（19GB / GPU 推奨）
 
 ### セットアップ
 
@@ -59,7 +59,7 @@ pnpm install
 cp .env.example .env
 
 # Ollama モデルを事前取得（未取得の場合）
-ollama pull qwen3.5:2b
+ollama pull gemma4:31b
 ```
 
 ### 起動

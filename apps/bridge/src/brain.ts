@@ -1,5 +1,5 @@
 /**
- * Brain: wraps Ollama REST API (Qwen3.5-2B) with streaming.
+ * Brain: wraps Ollama REST API (default: Gemma 4 31B) with streaming.
  *
  * Streaming flow:
  *  1. callOllamaStream() yields tokens from Ollama (stream:true, think:false)
@@ -54,7 +54,7 @@ export function getCurrentModel(): string {
 // ── System prompt ─────────────────────────────────────────────────────────────
 // NOTE: emotion/motion come BEFORE text so they are generated first.
 // This lets us send render_start before streaming text tokens.
-// Optimized for qwen3.5:2b + format:json
+// Designed for Ollama format:json output (Gemma 4 31B 標準、他モデルにも流用可)
 export const SYSTEM_PROMPT = `\
 あなたは「アリス」、明るいデスクトップAIコンパニオン（20代女性）。
 返答は必ず以下のJSON1行のみ。前後に一切のテキスト不要。
@@ -78,7 +78,7 @@ export const SYSTEM_PROMPT = `\
 YouTube開いて → {"emotion":"happy","motion":"nod","text":"ちょっと待ってね、YouTubeを開いてみるね！","memory_update":"NOOP","task":{"goal":"ブラウザでYouTubeを開く","constraints":{"no_credential":true,"allow_shell":false,"time_budget_sec":60}}}`;
 
 // ── JSON repair ───────────────────────────────────────────────────────────────
-// qwen3.5:2b sometimes emits unquoted keys or uses 」 as a closing quote.
+// ローカル LLM は稀にキー無引用符や全角引用符 」 を吐くため、保険として補修する。
 function repairJSON(s: string): string {
   // Replace Japanese closing quote 」 with "
   let out = s.replaceAll("」", '"');
