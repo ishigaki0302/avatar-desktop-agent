@@ -10,7 +10,15 @@ from fastapi import Depends, FastAPI, HTTPException, status
 from pydantic import BaseModel
 
 from agent.config import settings
-from agent.logger.interaction_logger import InteractionLogger, Session, TurnLog
+from agent.logger.interaction_logger import (
+    AvatarEventLog,
+    InteractionLogger,
+    MemoryAccessLog,
+    PromptLog,
+    Session,
+    ToolCallLog,
+    TurnLog,
+)
 
 app = FastAPI(title="avatar-agent", version="0.1.0")
 
@@ -102,3 +110,28 @@ def end_session(session_id: str, req: EndSessionRequest, logger: LoggerDep) -> S
     if session is None:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="session not found")
     return session
+
+
+# ── Phase 10: read prompt / tool / memory-access / avatar logs for a turn ──────
+# Writes happen in-process via InteractionLogger while a turn is being answered;
+# these endpoints expose the records for inspection and the dashboard (Phase 16).
+
+
+@app.get("/turns/{turn_id}/prompts")
+def get_prompts(turn_id: str, logger: LoggerDep) -> list[PromptLog]:
+    return logger.get_prompts(turn_id)
+
+
+@app.get("/turns/{turn_id}/tool-calls")
+def get_tool_calls(turn_id: str, logger: LoggerDep) -> list[ToolCallLog]:
+    return logger.get_tool_calls(turn_id)
+
+
+@app.get("/turns/{turn_id}/memory-accesses")
+def get_memory_accesses(turn_id: str, logger: LoggerDep) -> list[MemoryAccessLog]:
+    return logger.get_memory_accesses(turn_id)
+
+
+@app.get("/turns/{turn_id}/avatar-events")
+def get_avatar_events(turn_id: str, logger: LoggerDep) -> list[AvatarEventLog]:
+    return logger.get_avatar_events(turn_id)

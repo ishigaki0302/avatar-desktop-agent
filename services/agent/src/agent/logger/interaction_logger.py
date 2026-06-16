@@ -9,7 +9,7 @@ from __future__ import annotations
 
 from contextlib import closing
 from datetime import UTC, datetime
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, Literal
 from uuid import uuid4
 
 from pydantic import BaseModel
@@ -34,6 +34,36 @@ VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
 """
 
 _NEXT_TURN_INDEX = "SELECT COALESCE(MAX(turn_index), -1) + 1 AS next FROM turn_logs WHERE session_id = ?"
+
+_INSERT_PROMPT = """
+INSERT INTO prompt_logs
+  (id, turn_id, system_prompt, memory_context, recent_context, tool_context,
+   final_prompt, created_at)
+VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+"""
+
+_INSERT_TOOL_CALL = """
+INSERT INTO tool_call_logs
+  (id, turn_id, tool_name, input_json, output_json, status, latency_ms, error,
+   created_at)
+VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+"""
+
+_INSERT_MEMORY_ACCESS = """
+INSERT INTO memory_access_logs
+  (id, turn_id, memory_id, access_type, relevance_score, recency_score,
+   importance_score, final_score, reason, created_at)
+VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+"""
+
+_INSERT_AVATAR_EVENT = """
+INSERT INTO avatar_event_logs
+  (id, turn_id, emotion, motion, tts_enabled, tts_text, started_at, ended_at,
+   created_at)
+VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+"""
+
+AccessType = Literal["read", "write", "update", "delete", "supersede"]
 
 
 def _now_iso() -> str:
@@ -75,6 +105,62 @@ class TurnLog(BaseModel):
     motion: str | None = None
     status: str = "ok"
     error: str | None = None
+    created_at: str
+
+
+class PromptLog(BaseModel):
+    """How a turn's prompt was assembled (system + memory + recent + tools)."""
+
+    id: str
+    turn_id: str
+    system_prompt: str | None = None
+    memory_context: str | None = None
+    recent_context: str | None = None
+    tool_context: str | None = None
+    final_prompt: str | None = None
+    created_at: str
+
+
+class ToolCallLog(BaseModel):
+    """A single tool invocation made while answering a turn."""
+
+    id: str
+    turn_id: str
+    tool_name: str
+    input_json: str | None = None
+    output_json: str | None = None
+    status: str = "ok"
+    latency_ms: int | None = None
+    error: str | None = None
+    created_at: str
+
+
+class MemoryAccessLog(BaseModel):
+    """A memory read/write/update made while answering a turn."""
+
+    id: str
+    turn_id: str
+    memory_id: str | None = None
+    access_type: AccessType
+    relevance_score: float | None = None
+    recency_score: float | None = None
+    importance_score: float | None = None
+    final_score: float | None = None
+    reason: str | None = None
+    created_at: str
+
+
+class AvatarEventLog(BaseModel):
+    """An avatar expression / TTS event emitted for a turn."""
+
+    id: str
+    turn_id: str
+    emotion: str | None = None
+    motion: str | None = None
+    tts_enabled: bool | None = None
+    tts_text: str | None = None
+    started_at: str | None = None
+    ended_at: str | None = None
     created_at: str
 
 
@@ -201,3 +287,193 @@ class InteractionLogger:
                 (session_id,),
             ).fetchall()
         return [TurnLog(**dict(row)) for row in rows]
+
+    # ── Phase 10: prompt / tool / memory-access / avatar logs ──────────────────
+
+    def log_prompt(
+        self,
+        turn_id: str,
+        *,
+        system_prompt: str | None = None,
+        memory_context: str | None = None,
+        recent_context: str | None = None,
+        tool_context: str | None = None,
+        final_prompt: str | None = None,
+    ) -> PromptLog:
+        log = PromptLog(
+            id=_new_id(),
+            turn_id=turn_id,
+            system_prompt=system_prompt,
+            memory_context=memory_context,
+            recent_context=recent_context,
+            tool_context=tool_context,
+            final_prompt=final_prompt,
+            created_at=_now_iso(),
+        )
+        with closing(connect(self._db_path)) as conn, conn:
+            conn.execute(
+                _INSERT_PROMPT,
+                (
+                    log.id,
+                    log.turn_id,
+                    log.system_prompt,
+                    log.memory_context,
+                    log.recent_context,
+                    log.tool_context,
+                    log.final_prompt,
+                    log.created_at,
+                ),
+            )
+        return log
+
+    def log_tool_call(
+        self,
+        turn_id: str,
+        tool_name: str,
+        *,
+        input_json: str | None = None,
+        output_json: str | None = None,
+        status: str = "ok",
+        latency_ms: int | None = None,
+        error: str | None = None,
+    ) -> ToolCallLog:
+        log = ToolCallLog(
+            id=_new_id(),
+            turn_id=turn_id,
+            tool_name=tool_name,
+            input_json=input_json,
+            output_json=output_json,
+            status=status,
+            latency_ms=latency_ms,
+            error=error,
+            created_at=_now_iso(),
+        )
+        with closing(connect(self._db_path)) as conn, conn:
+            conn.execute(
+                _INSERT_TOOL_CALL,
+                (
+                    log.id,
+                    log.turn_id,
+                    log.tool_name,
+                    log.input_json,
+                    log.output_json,
+                    log.status,
+                    log.latency_ms,
+                    log.error,
+                    log.created_at,
+                ),
+            )
+        return log
+
+    def log_memory_access(
+        self,
+        turn_id: str,
+        access_type: AccessType,
+        *,
+        memory_id: str | None = None,
+        relevance_score: float | None = None,
+        recency_score: float | None = None,
+        importance_score: float | None = None,
+        final_score: float | None = None,
+        reason: str | None = None,
+    ) -> MemoryAccessLog:
+        log = MemoryAccessLog(
+            id=_new_id(),
+            turn_id=turn_id,
+            memory_id=memory_id,
+            access_type=access_type,
+            relevance_score=relevance_score,
+            recency_score=recency_score,
+            importance_score=importance_score,
+            final_score=final_score,
+            reason=reason,
+            created_at=_now_iso(),
+        )
+        with closing(connect(self._db_path)) as conn, conn:
+            conn.execute(
+                _INSERT_MEMORY_ACCESS,
+                (
+                    log.id,
+                    log.turn_id,
+                    log.memory_id,
+                    log.access_type,
+                    log.relevance_score,
+                    log.recency_score,
+                    log.importance_score,
+                    log.final_score,
+                    log.reason,
+                    log.created_at,
+                ),
+            )
+        return log
+
+    def log_avatar_event(
+        self,
+        turn_id: str,
+        *,
+        emotion: str | None = None,
+        motion: str | None = None,
+        tts_enabled: bool | None = None,
+        tts_text: str | None = None,
+        started_at: str | None = None,
+        ended_at: str | None = None,
+    ) -> AvatarEventLog:
+        log = AvatarEventLog(
+            id=_new_id(),
+            turn_id=turn_id,
+            emotion=emotion,
+            motion=motion,
+            tts_enabled=tts_enabled,
+            tts_text=tts_text,
+            started_at=started_at,
+            ended_at=ended_at,
+            created_at=_now_iso(),
+        )
+        with closing(connect(self._db_path)) as conn, conn:
+            conn.execute(
+                _INSERT_AVATAR_EVENT,
+                (
+                    log.id,
+                    log.turn_id,
+                    log.emotion,
+                    log.motion,
+                    None if log.tts_enabled is None else int(log.tts_enabled),
+                    log.tts_text,
+                    log.started_at,
+                    log.ended_at,
+                    log.created_at,
+                ),
+            )
+        return log
+
+    def get_prompts(self, turn_id: str) -> list[PromptLog]:
+        with closing(connect(self._db_path)) as conn:
+            rows = conn.execute(
+                "SELECT * FROM prompt_logs WHERE turn_id = ? ORDER BY created_at",
+                (turn_id,),
+            ).fetchall()
+        return [PromptLog(**dict(row)) for row in rows]
+
+    def get_tool_calls(self, turn_id: str) -> list[ToolCallLog]:
+        with closing(connect(self._db_path)) as conn:
+            rows = conn.execute(
+                "SELECT * FROM tool_call_logs WHERE turn_id = ? ORDER BY created_at",
+                (turn_id,),
+            ).fetchall()
+        return [ToolCallLog(**dict(row)) for row in rows]
+
+    def get_memory_accesses(self, turn_id: str) -> list[MemoryAccessLog]:
+        with closing(connect(self._db_path)) as conn:
+            rows = conn.execute(
+                "SELECT * FROM memory_access_logs WHERE turn_id = ? ORDER BY created_at",
+                (turn_id,),
+            ).fetchall()
+        return [MemoryAccessLog(**dict(row)) for row in rows]
+
+    def get_avatar_events(self, turn_id: str) -> list[AvatarEventLog]:
+        with closing(connect(self._db_path)) as conn:
+            rows = conn.execute(
+                "SELECT * FROM avatar_event_logs WHERE turn_id = ? ORDER BY created_at",
+                (turn_id,),
+            ).fetchall()
+        return [AvatarEventLog(**dict(row)) for row in rows]

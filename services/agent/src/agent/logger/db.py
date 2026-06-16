@@ -42,6 +42,63 @@ CREATE TABLE IF NOT EXISTS turn_logs (
 
 CREATE INDEX IF NOT EXISTS idx_turn_logs_session
   ON turn_logs (session_id, turn_index);
+
+CREATE TABLE IF NOT EXISTS prompt_logs (
+  id             TEXT PRIMARY KEY,
+  turn_id        TEXT NOT NULL,
+  system_prompt  TEXT,
+  memory_context TEXT,
+  recent_context TEXT,
+  tool_context   TEXT,
+  final_prompt   TEXT,
+  created_at     TEXT NOT NULL,
+  FOREIGN KEY (turn_id) REFERENCES turn_logs (id)
+);
+
+CREATE TABLE IF NOT EXISTS tool_call_logs (
+  id          TEXT PRIMARY KEY,
+  turn_id     TEXT NOT NULL,
+  tool_name   TEXT NOT NULL,
+  input_json  TEXT,
+  output_json TEXT,
+  status      TEXT,
+  latency_ms  INTEGER,
+  error       TEXT,
+  created_at  TEXT NOT NULL,
+  FOREIGN KEY (turn_id) REFERENCES turn_logs (id)
+);
+
+CREATE TABLE IF NOT EXISTS memory_access_logs (
+  id               TEXT PRIMARY KEY,
+  turn_id          TEXT NOT NULL,
+  memory_id        TEXT,
+  access_type      TEXT NOT NULL,
+  relevance_score  REAL,
+  recency_score    REAL,
+  importance_score REAL,
+  final_score      REAL,
+  reason           TEXT,
+  created_at       TEXT NOT NULL,
+  FOREIGN KEY (turn_id) REFERENCES turn_logs (id)
+);
+
+CREATE TABLE IF NOT EXISTS avatar_event_logs (
+  id          TEXT PRIMARY KEY,
+  turn_id     TEXT NOT NULL,
+  emotion     TEXT,
+  motion      TEXT,
+  tts_enabled INTEGER,
+  tts_text    TEXT,
+  started_at  TEXT,
+  ended_at    TEXT,
+  created_at  TEXT NOT NULL,
+  FOREIGN KEY (turn_id) REFERENCES turn_logs (id)
+);
+
+CREATE INDEX IF NOT EXISTS idx_prompt_logs_turn ON prompt_logs (turn_id);
+CREATE INDEX IF NOT EXISTS idx_tool_call_logs_turn ON tool_call_logs (turn_id);
+CREATE INDEX IF NOT EXISTS idx_memory_access_logs_turn ON memory_access_logs (turn_id);
+CREATE INDEX IF NOT EXISTS idx_avatar_event_logs_turn ON avatar_event_logs (turn_id);
 """
 
 
