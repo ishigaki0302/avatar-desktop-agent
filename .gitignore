@@ -18,3 +18,8 @@ __pycache__/
 .pytest_cache/
 .ruff_cache/
 *.egg-info/
+
+# Local interaction-log / memory databases (Phase 9+)
+*.sqlite
+*.sqlite-journal
+*.sqlite-wal
