@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import json
 from functools import lru_cache
 from pathlib import Path
 from typing import Annotated
@@ -34,6 +35,8 @@ from agent.memory.profile import ProfileStore
 from agent.memory.retrieval import MemoryRetriever, ScoredMemory, build_context
 from agent.memory.store import Memory, MemoryStore, MemoryType, Task, TaskStatus
 from agent.memory.writer import LLMExtractor, MemoryWriter
+from agent.tools.base import ToolResult, ToolSpec  # noqa: TC001  (FastAPI resolves these at runtime)
+from agent.tools.registry import ToolRegistry, build_default_registry
 
 app = FastAPI(title="avatar-agent", version="0.1.0")
 
@@ -110,6 +113,15 @@ def get_dashboard() -> Dashboard:
 
 
 DashboardDep = Annotated[Dashboard, Depends(get_dashboard)]
+
+
+@lru_cache
+def get_tool_registry() -> ToolRegistry:
+    """Return the process-wide tool registry (created on first use)."""
+    return build_default_registry(Path(settings.tools_root), get_memory_store())
+
+
+ToolRegistryDep = Annotated[ToolRegistry, Depends(get_tool_registry)]
 
 
 class StartSessionRequest(BaseModel):
@@ -200,6 +212,11 @@ class ExtractRequest(BaseModel):
 class AnalyzeRequest(BaseModel):
     user_input: str
     latency_ms: int | None = None
+
+
+class ToolInvokeRequest(BaseModel):
+    args: dict[str, object] = {}
+    turn_id: str | None = None
 
 
 @app.get("/health")
@@ -493,6 +510,36 @@ def dashboard_dissatisfaction(dashboard: DashboardDep, limit: int = 50) -> list[
 @app.get("/dashboard/stats")
 def dashboard_stats(dashboard: DashboardDep) -> DashboardStats:
     return dashboard.stats()
+
+
+# ── Phase 17: tool use (read-only filesystem + memory) ─────────────────────────
+
+
+@app.get("/tools")
+def list_tools(registry: ToolRegistryDep) -> list[ToolSpec]:
+    return registry.specs()
+
+
+@app.post("/tools/{name}")
+def invoke_tool(
+    name: str,
+    req: ToolInvokeRequest,
+    registry: ToolRegistryDep,
+    logger: LoggerDep,
+) -> ToolResult:
+    result = registry.run(name, req.args)
+    if req.turn_id:
+        logger.log_tool_call(
+            req.turn_id,
+            name,
+            input_json=json.dumps(req.args, ensure_ascii=False),
+            output_json=(
+                json.dumps(result.output, ensure_ascii=False, default=str) if result.output is not None else None
+            ),
+            status="ok" if result.ok else "error",
+            error=result.error,
+        )
+    return result
 
 
 @app.get("/dashboard", response_class=HTMLResponse)
