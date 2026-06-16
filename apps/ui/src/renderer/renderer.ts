@@ -9,7 +9,7 @@ import { Typewriter } from "./typewriter.js";
 declare global {
   interface Window {
     avatarBridge: {
-      sendMessage: (msg: string) => Promise<boolean>;
+      sendMessage: (msg: string) => Promise<{ ok: boolean; turnId: string | null }>;
       getSseUrl: () => Promise<string>;
     };
   }
@@ -23,6 +23,7 @@ const userInput   = document.getElementById("user-input") as HTMLInputElement;
 const sendBtn     = document.getElementById("send-btn") as HTMLButtonElement;
 const modelSelect = document.getElementById("model-select") as HTMLSelectElement;
 const modelLabel  = document.getElementById("model-label") as HTMLSpanElement;
+const feedbackBar = document.getElementById("feedback-bar") as HTMLDivElement;
 
 // ── Components ────────────────────────────────────────────────────────────────
 const avatar = new AvatarRenderer(canvas, 8);
@@ -153,6 +154,64 @@ function setStatus(state: "running" | "idle" | "error", message: string) {
   statusBar.className = state === "error" ? "error" : "";
 }
 
+// ── Feedback (Phase 11) ─────────────────────────────────────────────────────
+function clearFeedback() {
+  feedbackBar.replaceChildren();
+}
+
+async function submitFeedback(turnId: string, rating: number, label: string, comment?: string) {
+  try {
+    await fetch(`${bridgeBase}/feedback`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ turnId, rating, label, comment }),
+    });
+    clearFeedback();
+    const thanks = document.createElement("span");
+    thanks.className = "thanks";
+    thanks.textContent = "フィードバックありがとう";
+    feedbackBar.appendChild(thanks);
+  } catch {
+    setStatus("error", "フィードバック送信に失敗しました");
+  }
+}
+
+function showCommentInput(turnId: string) {
+  clearFeedback();
+  const input = document.createElement("input");
+  input.type = "text";
+  input.placeholder = "フィードバックを書く...";
+  input.maxLength = 2000;
+  const send = document.createElement("button");
+  send.textContent = "送信";
+  send.addEventListener("click", () => {
+    const comment = input.value.trim();
+    if (comment) submitFeedback(turnId, 3, "comment", comment);
+  });
+  feedbackBar.append(input, send);
+  input.focus();
+}
+
+function showFeedbackButtons(turnId: string) {
+  clearFeedback();
+  const good = document.createElement("button");
+  good.textContent = "👍";
+  good.title = "良い";
+  good.addEventListener("click", () => submitFeedback(turnId, 5, "helpful"));
+
+  const bad = document.createElement("button");
+  bad.textContent = "👎";
+  bad.title = "微妙";
+  bad.addEventListener("click", () => submitFeedback(turnId, 2, "not_helpful"));
+
+  const note = document.createElement("button");
+  note.textContent = "📝";
+  note.title = "理由を書く";
+  note.addEventListener("click", () => showCommentInput(turnId));
+
+  feedbackBar.append(good, bad, note);
+}
+
 // ── Input handling ────────────────────────────────────────────────────────────
 async function sendMessage() {
   const msg = userInput.value.trim();
@@ -161,12 +220,16 @@ async function sendMessage() {
   sendBtn.disabled = true;
   userInput.value = "";
   bubble.textContent = "...";
+  clearFeedback();
 
-  const ok = await window.avatarBridge.sendMessage(msg);
-  if (!ok) {
+  const result = await window.avatarBridge.sendMessage(msg);
+  if (!result.ok) {
     setStatus("error", "送信に失敗しました");
     sendBtn.disabled = false;
+    return;
   }
+  // turnId is null when the agent service is down or in stub mode — skip feedback UI.
+  if (result.turnId) showFeedbackButtons(result.turnId);
 }
 
 sendBtn.addEventListener("click", sendMessage);

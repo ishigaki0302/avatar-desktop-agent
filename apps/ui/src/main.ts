@@ -47,10 +47,12 @@ ipcMain.handle("chat:send", async (_event, message: string) => {
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ message }),
     });
-    return res.ok;
+    if (!res.ok) return { ok: false, turnId: null };
+    const data = await res.json() as { ok: boolean; turnId?: string | null };
+    return { ok: data.ok, turnId: data.turnId ?? null };
   } catch (err) {
     log.error("Failed to send chat message", err);
-    return false;
+    return { ok: false, turnId: null };
   }
 });
 

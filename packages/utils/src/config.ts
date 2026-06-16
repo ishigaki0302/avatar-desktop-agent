@@ -33,6 +33,10 @@ export const config = {
     temperature:   parseFloat(env("REMOTE_GPU_TEMPERATURE", "0.75")),
     timeoutMs:     envInt("REMOTE_GPU_TIMEOUT_MS", 120_000),
   },
+  // Python agent service (FastAPI): interaction logging / feedback / analytics
+  agentService: {
+    baseUrl: env("AGENT_SERVICE_URL", "http://127.0.0.1:8000"),
+  },
   bridge: {
     port: envInt("BRIDGE_PORT", 3000),
     host: env("BRIDGE_HOST", "127.0.0.1"),

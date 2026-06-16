@@ -6,7 +6,7 @@ import { contextBridge, ipcRenderer } from "electron";
 
 contextBridge.exposeInMainWorld("avatarBridge", {
   sendMessage: (message: string) =>
-    ipcRenderer.invoke("chat:send", message) as Promise<boolean>,
+    ipcRenderer.invoke("chat:send", message) as Promise<{ ok: boolean; turnId: string | null }>,
   getSseUrl: () =>
     ipcRenderer.invoke("sse:url") as Promise<string>,
 });

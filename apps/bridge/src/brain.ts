@@ -31,6 +31,15 @@ let stubIndex = 0;
 const MAX_RETRIES = 2;
 const MAX_HISTORY_MESSAGES = 10;
 
+// Result of a completed turn, surfaced so the bridge can log it to the agent service.
+export interface TurnResult {
+  user: string;
+  assistant: string;
+  emotion: Emotion;
+  motion: Motion;
+  latencyMs: number;
+}
+
 // ── Runtime model state ───────────────────────────────────────────────────────
 let currentModel = config.ollama.model;
 
@@ -113,7 +122,7 @@ export async function ask(
   userMessage: string,
   broadcast: (event: UIEvent) => void,
   session?: SessionLogger,
-): Promise<void> {
+): Promise<TurnResult | null> {
   if (STUB_MODE) {
     log.info(`[STUB] responding to: "${userMessage}"`);
     const response = STUB_RESPONSES[stubIndex % STUB_RESPONSES.length]!;
@@ -123,7 +132,7 @@ export async function ask(
       broadcast({ type: "render_token", token: char });
     }
     broadcast({ type: "render_end" });
-    return;
+    return null;
   }
 
   const memory = await readMemory();
@@ -176,7 +185,7 @@ export async function ask(
         ttft_ms: ttftMs,
       }).catch((e) => log.warn("session log failed", e));
 
-      return;
+      return { user: userMessage, assistant: text, emotion, motion, latencyMs: Date.now() - startMs };
     } catch (err) {
       if (err instanceof TypeError && (err as TypeError).message.includes("fetch")) {
         broadcast({ type: "status", state: "error", message: "Ollama に接続できません" });
@@ -200,6 +209,8 @@ export async function ask(
     motion: "none",
     latency_ms: Date.now() - startMs,
   }).catch((e) => log.warn("session log failed", e));
+
+  return { user: userMessage, assistant: fallbackText, emotion: "confused", motion: "none", latencyMs: Date.now() - startMs };
 }
 
 /** Expose history for testing */

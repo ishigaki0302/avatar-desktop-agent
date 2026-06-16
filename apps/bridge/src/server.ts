@@ -11,11 +11,57 @@ import cors from "@fastify/cors";
 import type { UIEvent } from "@avatar-agent/schema";
 import { config, createLogger } from "@avatar-agent/utils";
 import { ask, setModel, getCurrentModel } from "./brain.js";
+import type { TurnResult } from "./brain.js";
 import type { SessionLogger } from "./session.js";
 
 const log = createLogger("server");
 
 const MAX_SSE_CLIENTS = 3;
+
+// ── Python agent service (best-effort: chat must keep working if it is down) ──
+const agentBase = config.agentService.baseUrl;
+let agentSessionId: string | null = null;
+
+async function ensureAgentSession(): Promise<string | null> {
+  if (agentSessionId) return agentSessionId;
+  try {
+    const res = await fetch(`${agentBase}/sessions`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ model: getCurrentModel() }),
+    });
+    if (!res.ok) return null;
+    const data = await res.json() as { id: string };
+    agentSessionId = data.id;
+    return agentSessionId;
+  } catch {
+    return null; // agent service not running — skip logging
+  }
+}
+
+async function logTurnToAgent(result: TurnResult): Promise<string | null> {
+  const sid = await ensureAgentSession();
+  if (!sid) return null;
+  try {
+    const res = await fetch(`${agentBase}/sessions/${sid}/turns`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        user_input: result.user,
+        assistant_output: result.assistant,
+        model: getCurrentModel(),
+        emotion: result.emotion,
+        motion: result.motion,
+        latency_ms: result.latencyMs,
+      }),
+    });
+    if (!res.ok) return null;
+    const data = await res.json() as { id: string };
+    return data.id;
+  } catch {
+    return null;
+  }
+}
 
 // SSE subscriber registry
 type Subscriber = (event: UIEvent) => void;
@@ -130,9 +176,10 @@ export async function startServer(session?: SessionLogger) {
     broadcast({ type: "status", state: "running", message: "考え中..." });
 
     try {
-      await ask(message, broadcast, session);
+      const result = await ask(message, broadcast, session);
       broadcast({ type: "status", state: "idle", message: "Ready" });
-      return reply.send({ ok: true });
+      const turnId = result ? await logTurnToAgent(result) : null;
+      return reply.send({ ok: true, turnId });
     } catch (err) {
       log.error("Brain error", err);
       broadcast({
@@ -141,6 +188,35 @@ export async function startServer(session?: SessionLogger) {
         message: "エラーが発生しました。もう一度お試しください。",
       });
       return reply.status(500).send({ ok: false, error: "Brain error" });
+    }
+  });
+
+  // ── Feedback (proxy to agent service) ─────────────────────────────────────────
+  app.post<{ Body: { turnId: string; rating?: number; label?: string; comment?: string } }>("/feedback", {
+    schema: {
+      body: {
+        type: "object",
+        required: ["turnId"],
+        properties: {
+          turnId: { type: "string", minLength: 1 },
+          rating: { type: "integer", minimum: 1, maximum: 5 },
+          label: { type: "string", maxLength: 64 },
+          comment: { type: "string", maxLength: 2000 },
+        },
+      },
+    },
+  }, async (req, reply) => {
+    const { turnId, rating, label, comment } = req.body;
+    try {
+      const res = await fetch(`${agentBase}/turns/${turnId}/feedback`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ rating, label, comment }),
+      });
+      if (!res.ok) return reply.status(502).send({ ok: false, error: "agent service error" });
+      return reply.send({ ok: true });
+    } catch {
+      return reply.status(503).send({ ok: false, error: "agent service unavailable" });
     }
   });
 
