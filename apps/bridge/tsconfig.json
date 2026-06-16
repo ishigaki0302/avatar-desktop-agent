@@ -2,11 +2,12 @@
   "extends": "../../tsconfig.base.json",
   "compilerOptions": {
     "outDir": "dist",
+    "rootDir": "../..",
     "paths": {
       "@avatar-agent/schema": ["../../packages/schema/src/index.ts"],
       "@avatar-agent/utils": ["../../packages/utils/src/index.ts"]
     }
   },
   "include": ["src", "../../packages/schema/src", "../../packages/utils/src"],
-  "exclude": ["src/**/*.test.ts"]
+  "exclude": ["src/**/*.test.ts", "../../packages/schema/src/**/*.test.ts", "../../packages/utils/src/**/*.test.ts"]
 }
