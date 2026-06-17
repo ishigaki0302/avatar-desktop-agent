@@ -39,27 +39,40 @@ async function ensureAgentSession(): Promise<string | null> {
   }
 }
 
-async function logTurnToAgent(result: TurnResult): Promise<string | null> {
+// Open the turn up front (with the user input) so tool calls made during the
+// answer can be logged against a real turn_id. Returns null if the agent is down.
+async function openTurn(userMessage: string): Promise<string | null> {
   const sid = await ensureAgentSession();
   if (!sid) return null;
   try {
     const res = await fetch(`${agentBase}/sessions/${sid}/turns`, {
       method: "POST",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({
-        user_input: result.user,
-        assistant_output: result.assistant,
-        model: getCurrentModel(),
-        emotion: result.emotion,
-        motion: result.motion,
-        latency_ms: result.latencyMs,
-      }),
+      body: JSON.stringify({ user_input: userMessage, model: getCurrentModel() }),
     });
     if (!res.ok) return null;
     const data = await res.json() as { id: string };
     return data.id;
   } catch {
-    return null;
+    return null; // agent service not running — skip logging
+  }
+}
+
+// Fill in the assistant side once the answer is ready.
+async function closeTurn(turnId: string, result: TurnResult): Promise<void> {
+  try {
+    await fetch(`${agentBase}/turns/${turnId}`, {
+      method: "PATCH",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        assistant_output: result.assistant,
+        emotion: result.emotion,
+        motion: result.motion,
+        latency_ms: result.latencyMs,
+      }),
+    });
+  } catch {
+    // best-effort
   }
 }
 
@@ -176,9 +189,10 @@ export async function startServer(session?: SessionLogger) {
     broadcast({ type: "status", state: "running", message: "考え中..." });
 
     try {
-      const result = await ask(message, broadcast, session);
+      const turnId = await openTurn(message);
+      const result = await ask(message, broadcast, session, turnId);
       broadcast({ type: "status", state: "idle", message: "Ready" });
-      const turnId = result ? await logTurnToAgent(result) : null;
+      if (turnId && result) await closeTurn(turnId, result);
       return reply.send({ ok: true, turnId });
     } catch (err) {
       log.error("Brain error", err);
