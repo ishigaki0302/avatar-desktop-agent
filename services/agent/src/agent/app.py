@@ -2,11 +2,13 @@
 
 from __future__ import annotations
 
+import base64
 import json
 from functools import lru_cache
 from pathlib import Path
 from typing import Annotated
 
+import httpx
 from fastapi import Depends, FastAPI, HTTPException, Query, status
 from fastapi.responses import HTMLResponse
 from pydantic import BaseModel
@@ -38,6 +40,7 @@ from agent.memory.writer import LLMExtractor, MemoryWriter
 from agent.tools.base import ToolResult, ToolSpec  # noqa: TC001  (FastAPI resolves these at runtime)
 from agent.tools.registry import ToolRegistry, build_default_registry
 from agent.tools.web import HttpWebClient, StubWebClient, WebClient, WebSource, WebSourceStore
+from agent.tts.engine import get_tts_engine, split_sentences
 
 app = FastAPI(title="avatar-agent", version="0.1.0")
 
@@ -237,6 +240,26 @@ class ToolInvokeRequest(BaseModel):
     args: dict[str, object] = {}
     turn_id: str | None = None
     confirm: bool = False
+
+
+class TTSRequest(BaseModel):
+    text: str
+
+
+class TTSResponse(BaseModel):
+    enabled: bool
+    sentences: list[str]
+    audio_base64: str | None = None
+    audio_format: str | None = None
+
+
+class AvatarEventRequest(BaseModel):
+    emotion: str | None = None
+    motion: str | None = None
+    tts_enabled: bool | None = None
+    tts_text: str | None = None
+    started_at: str | None = None
+    ended_at: str | None = None
 
 
 @app.get("/health")
@@ -565,6 +588,42 @@ def invoke_tool(
 @app.get("/web/sources")
 def list_web_sources(sources: WebSourcesDep, limit: int = 50) -> list[WebSource]:
     return sources.list_sources(limit=limit)
+
+
+# ── Phase 19: TTS + avatar events ──────────────────────────────────────────────
+
+
+@app.post("/tts")
+def synthesize_tts(req: TTSRequest) -> TTSResponse:
+    sentences = split_sentences(req.text)
+    if not settings.tts_enabled:
+        # Text-only mode: return sentence segmentation, no audio.
+        return TTSResponse(enabled=False, sentences=sentences)
+    try:
+        audio = get_tts_engine().synthesize(req.text)
+    except (httpx.HTTPError, OSError):
+        audio = b""
+    if not audio:
+        return TTSResponse(enabled=True, sentences=sentences)
+    return TTSResponse(
+        enabled=True,
+        sentences=sentences,
+        audio_base64=base64.b64encode(audio).decode("ascii"),
+        audio_format="wav",
+    )
+
+
+@app.post("/turns/{turn_id}/avatar-events", status_code=status.HTTP_201_CREATED)
+def create_avatar_event(turn_id: str, req: AvatarEventRequest, logger: LoggerDep) -> AvatarEventLog:
+    return logger.log_avatar_event(
+        turn_id,
+        emotion=req.emotion,
+        motion=req.motion,
+        tts_enabled=req.tts_enabled,
+        tts_text=req.tts_text,
+        started_at=req.started_at,
+        ended_at=req.ended_at,
+    )
 
 
 @app.get("/dashboard", response_class=HTMLResponse)

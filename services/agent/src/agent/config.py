@@ -30,5 +30,11 @@ class Settings(BaseSettings):
     # Web tools (Phase 18). "http" = real fetch/search, "stub" = offline.
     web_backend: str = "http"  # "http" | "stub"
 
+    # TTS (Phase 19). Off by default → text-only mode works out of the box.
+    tts_enabled: bool = False
+    tts_backend: str = "noop"  # "noop" | "voicevox"
+    voicevox_url: str = "http://127.0.0.1:50021"
+    voicevox_speaker: int = 1
+
 
 settings = Settings()
