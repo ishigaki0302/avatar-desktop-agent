@@ -12,7 +12,6 @@ import type { UIEvent, Emotion, Motion } from "@avatar-agent/schema";
 import { isValidEmotion, isValidMotion } from "@avatar-agent/schema";
 import { config, createLogger, extractJSON, truncate } from "@avatar-agent/utils";
 import { readMemory, applyMemoryUpdate } from "./memory.js";
-import { delegateTask } from "./openclaw.js";
 import type { SessionLogger } from "./session.js";
 
 const log = createLogger("brain");
@@ -69,22 +68,20 @@ export const SYSTEM_PROMPT = `\
 返答は必ず以下のJSON1行のみ。前後に一切のテキスト不要。
 引用符は必ず半角ダブルクォート（"）を使う。全角引用符は使わない。
 
-{"emotion":"値","motion":"値","text":"値","memory_update":"NOOP","task":null}
+{"emotion":"値","motion":"値","text":"値","memory_update":"NOOP"}
 
 【emotion】happy / neutral / surprised / sad / confused のどれか1つ
 【motion】wave=挨拶のみ / nod=相槌・共感 / shake=嫌がる・断る / bow_small=お礼 / none=その他
-【text】口語体で1文・15〜35文字・絵文字禁止・！以外の記号禁止
+【text】口語体で1文・15〜35文字・絵文字禁止・！以外の記号禁止（ツール結果がある場合は別途指示に従い長め・記号可）
 【memory_update】名前や好みを教えてくれたとき "- キー: 値"、それ以外は必ず "NOOP"
-【task】操作依頼のとき {"goal":"内容","constraints":{"no_credential":true,"allow_shell":false,"time_budget_sec":60}}、それ以外は必ず null
 
 【例】
-おはよう → {"emotion":"happy","motion":"wave","text":"おはよう！今日も一緒に楽しくやっていこうね！","memory_update":"NOOP","task":null}
-疲れたな → {"emotion":"sad","motion":"nod","text":"お疲れさま、無理しないでゆっくり休んでね。","memory_update":"NOOP","task":null}
-ありがとう → {"emotion":"happy","motion":"bow_small","text":"どういたしまして、また気軽に話しかけてね！","memory_update":"NOOP","task":null}
-それは嫌だな → {"emotion":"confused","motion":"shake","text":"そっか、気持ちわかるよ、どうしたらいいかな。","memory_update":"NOOP","task":null}
-コーヒーが好き → {"emotion":"happy","motion":"nod","text":"コーヒー好きなんだね、私も大好きだよ！","memory_update":"- 好きなもの: コーヒー","task":null}
-名前は田中です → {"emotion":"happy","motion":"nod","text":"田中さんって言うんだね！よろしくね！","memory_update":"- 名前: 田中","task":null}
-YouTube開いて → {"emotion":"happy","motion":"nod","text":"ちょっと待ってね、YouTubeを開いてみるね！","memory_update":"NOOP","task":{"goal":"ブラウザでYouTubeを開く","constraints":{"no_credential":true,"allow_shell":false,"time_budget_sec":60}}}`;
+おはよう → {"emotion":"happy","motion":"wave","text":"おはよう！今日も一緒に楽しくやっていこうね！","memory_update":"NOOP"}
+疲れたな → {"emotion":"sad","motion":"nod","text":"お疲れさま、無理しないでゆっくり休んでね。","memory_update":"NOOP"}
+ありがとう → {"emotion":"happy","motion":"bow_small","text":"どういたしまして、また気軽に話しかけてね！","memory_update":"NOOP"}
+それは嫌だな → {"emotion":"confused","motion":"shake","text":"そっか、気持ちわかるよ、どうしたらいいかな。","memory_update":"NOOP"}
+コーヒーが好き → {"emotion":"happy","motion":"nod","text":"コーヒー好きなんだね、私も大好きだよ！","memory_update":"- 好きなもの: コーヒー"}
+名前は田中です → {"emotion":"happy","motion":"nod","text":"田中さんって言うんだね！よろしくね！","memory_update":"- 名前: 田中"}`;
 
 // ── JSON repair ───────────────────────────────────────────────────────────────
 // ローカル LLM は稀にキー無引用符や全角引用符 」 を吐くため、保険として補修する。
@@ -284,19 +281,9 @@ export async function ask(
         broadcast,
       );
 
-      // Parse full buffer for side-effects (memory, task)
+      // Parse full buffer for side-effects (memory). Actions go through the
+      // tool-calling loop now; the legacy OpenClaw `task` path was removed.
       const parsed = extractJSON(repairJSON(rawBuffer));
-
-      const taskField = parsed?.["task"];
-      if (taskField && typeof taskField === "object") {
-        const t = taskField as Record<string, unknown>;
-        const goal = typeof t["goal"] === "string" ? t["goal"].trim() : "";
-        if (goal) {
-          broadcast({ type: "status", state: "running", message: `タスク実行中: ${truncate(goal, 40)}` });
-          const summary = await delegateTask(goal);
-          broadcast({ type: "result", summary, details: null });
-        }
-      }
 
       const memUpdate = parsed?.["memory_update"];
       if (typeof memUpdate === "string" && memUpdate !== "NOOP") {
