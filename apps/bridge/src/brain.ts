@@ -128,10 +128,11 @@ export interface ToolCall {
 
 const AGENT_STEP_PROMPT = `\
 あなたはツール使用エージェント。ユーザーに答えるため、必要なら複数回ツールを使う。
-これまでのツール結果を見て、次の行動をJSON1行で返す: {"tool_calls":[{"name":"...","args":{...}}]}
+会話履歴と「これまでに試したツールと結果(引数つき)」を踏まえ、次の行動をJSON1行で返す: {"tool_calls":[{"name":"...","args":{...}}]}
 すぐ諦めないこと:
-- 結果が空/不十分なら、別の引数や別のツールで再試行する
-  例) filesystem.search が空なら拡張子だけ '*.pptx' で再検索 / web.search の後は browser.read で本文取得
+- 既に試した tool+引数と同じものは絶対に繰り返さない（同じ検索の連発は禁止）
+- 結果が空/不十分なら、必ず引数を変える・条件を広げる・別ツールに切り替える
+  例) filesystem.search '*自己紹介*.pptx' が空 → '*.pptx' に広げて候補を出す / web.search の後は browser.read で本文取得
 - 十分な情報が集まった、または挨拶・雑談・これ以上手段が無い場合のみ {"tool_calls":[]}
 
 使えるツール:
@@ -159,7 +160,7 @@ export function parseToolCalls(raw: string): ToolCall[] {
   return out;
 }
 
-async function callOllamaJSON(system: string, userContent: string): Promise<string> {
+async function callOllamaJSON(system: string, messages: ChatMessage[]): Promise<string> {
   const res = await fetch(`${config.ollama.baseUrl}/api/chat`, {
     method: "POST",
     headers: { "Content-Type": "application/json" },
@@ -168,10 +169,7 @@ async function callOllamaJSON(system: string, userContent: string): Promise<stri
       stream: false,
       think: false,
       format: "json",
-      messages: [
-        { role: "system", content: system },
-        { role: "user", content: userContent },
-      ],
+      messages: [{ role: "system", content: system }, ...messages],
       options: { temperature: 0, num_predict: 200 },
     }),
     signal: AbortSignal.timeout(config.ollama.timeoutMs),
@@ -187,17 +185,23 @@ async function callOllamaJSON(system: string, userContent: string): Promise<stri
  * empty or insufficient — instead of giving up after one try. Returns the
  * accumulated tool-result transcript (empty string if no tools were used).
  */
-async function runAgentLoop(
-  userMessage: string,
-  broadcast: (event: UIEvent) => void,
-  turnId: string | null,
-): Promise<string> {
+async function runAgentLoop(broadcast: (event: UIEvent) => void, turnId: string | null): Promise<string> {
   const transcript: string[] = [];
   for (let step = 0; step < MAX_AGENT_STEPS; step++) {
-    const soFar = transcript.length > 0 ? `\n\n# これまでのツール結果\n${transcript.join("\n\n")}` : "";
+    // Give the planner the conversation history (so follow-ups have context) plus
+    // exactly what was already tried with which args (so it doesn't repeat).
+    const stepMessages: ChatMessage[] = history.slice(-MAX_HISTORY_MESSAGES).map((m) => ({ ...m }));
+    if (transcript.length > 0) {
+      stepMessages.push({
+        role: "user",
+        content:
+          "# これまでに試したツールと結果（同じ tool+引数は繰り返さない。空なら引数を変える/広げる）\n" +
+          transcript.join("\n\n"),
+      });
+    }
     let calls: ToolCall[];
     try {
-      calls = parseToolCalls(await callOllamaJSON(AGENT_STEP_PROMPT, `ユーザー: ${userMessage}${soFar}`));
+      calls = parseToolCalls(await callOllamaJSON(AGENT_STEP_PROMPT, stepMessages));
     } catch (e) {
       log.warn("agent step failed", e);
       break;
@@ -228,9 +232,11 @@ async function executeTools(
       });
       if (!res.ok) continue;
       const data = await res.json() as { ok: boolean; output?: unknown; error?: string };
+      // Include the args so the planner can see exactly what was already tried.
+      const head = `## ${call.name} ${JSON.stringify(call.args)}`;
       blocks.push(data.ok
-        ? `## ${call.name}\n${truncate(JSON.stringify(data.output), TOOL_OUTPUT_MAX)}`
-        : `## ${call.name}: エラー ${data.error ?? ""}`);
+        ? `${head}\n${truncate(JSON.stringify(data.output), TOOL_OUTPUT_MAX)}`
+        : `${head}: エラー ${data.error ?? ""}`);
     } catch (e) {
       log.warn(`tool ${call.name} failed`, e);
     }
@@ -269,7 +275,7 @@ export async function ask(
   // ground the answer in the accumulated results.
   let systemPrompt = systemWithMemory;
   if (TOOL_USE_ENABLED && config.brainBackend === "ollama") {
-    const toolContext = await runAgentLoop(userMessage, broadcast, turnId);
+    const toolContext = await runAgentLoop(broadcast, turnId);
     if (toolContext) {
       // Tool results often contain paths/URLs/numbers, so relax the short-answer
       // format: allow longer text and symbols (/ . : etc.) to report specifics.
