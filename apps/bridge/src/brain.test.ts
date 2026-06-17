@@ -8,6 +8,7 @@ import { test, describe } from "node:test";
 import assert from "node:assert/strict";
 import { extractJSON, stripLLMNoise } from "@avatar-agent/utils";
 import { parseRenderEvent, isValidEmotion, isValidMotion } from "@avatar-agent/schema";
+import { parseToolCalls } from "./brain.js";
 
 // ── stripLLMNoise ─────────────────────────────────────────────────────────────
 describe("stripLLMNoise", () => {
@@ -156,5 +157,41 @@ describe("Full parse pipeline (simulate Ollama output → RenderEvent)", () => {
     const raw = '{"text":"","emotion":"happy"}';
     const ev = pipelineFrom(raw);
     assert.equal(ev, null);
+  });
+});
+
+// ── parseToolCalls (agentic tool-calling, #69) ────────────────────────────────
+describe("parseToolCalls", () => {
+  test("parses a web.search tool call", () => {
+    const calls = parseToolCalls('{"tool_calls":[{"name":"web.search","args":{"query":"東京 天気"}}]}');
+    assert.equal(calls.length, 1);
+    assert.equal(calls[0]!.name, "web.search");
+    assert.equal(calls[0]!.args["query"], "東京 天気");
+  });
+
+  test("empty tool_calls → []", () => {
+    assert.deepEqual(parseToolCalls('{"tool_calls":[]}'), []);
+  });
+
+  test("no tool_calls field / junk → []", () => {
+    assert.deepEqual(parseToolCalls('{"text":"hi"}'), []);
+    assert.deepEqual(parseToolCalls("not json"), []);
+  });
+
+  test("missing args defaults to {}", () => {
+    const calls = parseToolCalls('{"tool_calls":[{"name":"memory.search"}]}');
+    assert.equal(calls.length, 1);
+    assert.deepEqual(calls[0]!.args, {});
+  });
+
+  test("caps at 2 tool calls", () => {
+    const raw = '{"tool_calls":[{"name":"a"},{"name":"b"},{"name":"c"}]}';
+    assert.equal(parseToolCalls(raw).length, 2);
+  });
+
+  test("drops entries without a string name", () => {
+    const calls = parseToolCalls('{"tool_calls":[{"args":{}},{"name":"web.search","args":{}}]}');
+    assert.equal(calls.length, 1);
+    assert.equal(calls[0]!.name, "web.search");
   });
 });
