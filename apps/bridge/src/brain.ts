@@ -248,7 +248,12 @@ export async function ask(
     if (calls.length > 0) {
       const toolContext = await executeTools(calls, broadcast);
       if (toolContext) {
-        systemPrompt = `${systemWithMemory}\n\n# ツール実行結果(この事実に基づいて答える)\n${toolContext}`;
+        // Tool results often contain paths/URLs/numbers, so relax the short-answer
+        // format: allow longer text and symbols (/ . : etc.) to report specifics.
+        systemPrompt =
+          `${systemWithMemory}\n\n# ツール実行結果(この事実に基づいて具体的に答える)\n${toolContext}\n\n` +
+          "※この結果を使うときは text の制約を緩める: 40〜140文字可、ファイルパス・URL・数値・記号を含めてよい。" +
+          "見つかったファイル名やパスは具体的に答える。該当が無ければ正直に無いと言う。";
       }
     }
   }
