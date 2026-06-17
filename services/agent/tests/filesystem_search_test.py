@@ -41,3 +41,17 @@ def test_search_name_substring(tmp_path: Path) -> None:
 def test_search_no_match(tmp_path: Path) -> None:
     fs = FilesystemTools(_workspace(tmp_path))
     assert fs.search("*.xlsx") == []
+
+
+def test_search_prioritizes_document_dirs_over_noise(tmp_path: Path) -> None:
+    # A user's file in Documents must not be crowded out of the capped results by
+    # a large dev/data tree (regression: 622 pptx in dev/ hid Documents/Downloads).
+    (tmp_path / "Documents").mkdir()
+    (tmp_path / "Documents" / "自己紹介資料.pptx").write_text("x", encoding="utf-8")
+    noisy = tmp_path / "dev" / "data"
+    noisy.mkdir(parents=True)
+    for i in range(60):  # exceeds the result cap
+        (noisy / f"export_{i}.pptx").write_text("x", encoding="utf-8")
+
+    paths = {h["path"] for h in FilesystemTools(tmp_path).search("*.pptx")}
+    assert "Documents/自己紹介資料.pptx" in paths

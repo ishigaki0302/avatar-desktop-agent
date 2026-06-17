@@ -31,6 +31,9 @@ _DENY_SUBSTRINGS = (
 _MAX_READ_BYTES = 1_000_000
 # Directory names pruned during recursive search (noise / heavy / sensitive).
 _SKIP_DIRS = frozenset({"node_modules", "__pycache__", ".venv", "venv", "Library", ".Trash", "dist", "build"})
+# Searched first on a whole-root search so user documents aren't crowded out by
+# large dev/data trees before the result cap is hit.
+_PRIORITY_SUBDIRS = ("Desktop", "Documents", "Downloads")
 _SEARCH_MAX_RESULTS = 50
 _SEARCH_MAX_SCAN = 20_000
 
@@ -77,27 +80,52 @@ class FilesystemTools:
     def search(self, pattern: str, path: str = ".") -> list[dict[str, object]]:
         """Recursively find files matching a glob `pattern` (e.g. '*.pptx') under the root.
 
-        Prunes hidden / heavy dirs, skips sensitive files, and is capped in results
+        On a whole-root search, Desktop/Documents/Downloads are scanned first so a
+        user's files aren't crowded out of the (capped) results by large dev/data
+        trees. Prunes hidden/heavy dirs, skips sensitive files, capped in results
         and files scanned so a large home directory stays responsive.
         """
         base = self._resolve(path)
         if not base.is_dir():
             raise ToolError("not a directory")
         needle = pattern.lower()
+        walk_roots, skip_top = self._search_roots(base)
         results: list[dict[str, object]] = []
+        seen: set[str] = set()
         scanned = 0
-        for dirpath, dirnames, filenames in os.walk(base):
-            dirnames[:] = [d for d in dirnames if not d.startswith(".") and d not in _SKIP_DIRS]
-            for name in filenames:
-                scanned += 1
-                if scanned > _SEARCH_MAX_SCAN:
-                    return results
-                if not fnmatch.fnmatch(name.lower(), needle):
-                    continue
-                full = Path(dirpath) / name
-                if any(token in str(full).lower() for token in _DENY_SUBSTRINGS):
-                    continue
-                results.append({"path": str(full.relative_to(self._root)), "size": full.stat().st_size})
-                if len(results) >= _SEARCH_MAX_RESULTS:
-                    return results
+        for walk_root in walk_roots:
+            for dirpath, dirnames, filenames in os.walk(walk_root):
+                dirnames[:] = [d for d in dirnames if not d.startswith(".") and d not in _SKIP_DIRS]
+                if walk_root == base and dirpath == str(base):
+                    dirnames[:] = [d for d in dirnames if d not in skip_top]  # already walked
+                for name in filenames:
+                    scanned += 1
+                    if scanned > _SEARCH_MAX_SCAN:
+                        return results
+                    if not fnmatch.fnmatch(name.lower(), needle):
+                        continue
+                    full = Path(dirpath) / name
+                    if any(token in str(full).lower() for token in _DENY_SUBSTRINGS):
+                        continue
+                    rel = str(full.relative_to(self._root))
+                    if rel in seen:
+                        continue
+                    seen.add(rel)
+                    results.append({"path": rel, "size": full.stat().st_size})
+                    if len(results) >= _SEARCH_MAX_RESULTS:
+                        return results
         return results
+
+    def _search_roots(self, base: Path) -> tuple[list[Path], set[str]]:
+        """Walk order: priority doc dirs first (only for a whole-root search), then base."""
+        if base != self._root:
+            return [base], set()
+        roots: list[Path] = []
+        skip_top: set[str] = set()
+        for sub in _PRIORITY_SUBDIRS:
+            candidate = base / sub
+            if candidate.is_dir():
+                roots.append(candidate)
+                skip_top.add(sub)
+        roots.append(base)
+        return roots, skip_top
