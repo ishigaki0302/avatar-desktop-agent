@@ -15,6 +15,7 @@ class ToolSpec(BaseModel):
     name: str
     description: str
     args_schema: dict[str, object]
+    requires_confirmation: bool = False
 
 
 class ToolResult(BaseModel):

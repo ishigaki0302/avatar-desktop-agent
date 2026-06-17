@@ -27,5 +27,8 @@ class Settings(BaseSettings):
     # Interaction analytics (Phase 15). "rule" = offline/deterministic default.
     analytics_backend: str = "rule"  # "rule" | "ollama"
 
+    # Web tools (Phase 18). "http" = real fetch/search, "stub" = offline.
+    web_backend: str = "http"  # "http" | "stub"
+
 
 settings = Settings()

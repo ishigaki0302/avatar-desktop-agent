@@ -1,4 +1,4 @@
-"""Tool registry: schema listing, arg validation, safe dispatch (Phase 17)."""
+"""Tool registry: schema listing, arg validation, safe dispatch (Phase 17-18)."""
 
 from __future__ import annotations
 
@@ -10,15 +10,18 @@ from agent.memory.store import MemoryType  # noqa: TC001  (pydantic field type, 
 from agent.tools.base import ToolError, ToolResult, ToolSpec
 from agent.tools.filesystem import FilesystemTools
 from agent.tools.memory_tools import MemoryTools
+from agent.tools.web import WebTools
 
 if TYPE_CHECKING:
     from collections.abc import Callable
     from pathlib import Path
 
     from agent.memory.store import MemoryStore
+    from agent.tools.web import WebClient, WebSourceStore
 
 _DEFAULT_SEARCH_LIMIT = 10
 _DEFAULT_IMPORTANCE = 3
+_DEFAULT_WEB_SEARCH_LIMIT = 5
 
 
 class FilesystemListArgs(BaseModel):
@@ -41,6 +44,16 @@ class MemoryWriteArgs(BaseModel):
     importance: int = _DEFAULT_IMPORTANCE
 
 
+class WebSearchArgs(BaseModel):
+    query: str
+    limit: int = _DEFAULT_WEB_SEARCH_LIMIT
+
+
+class BrowserReadArgs(BaseModel):
+    url: str
+    query: str | None = None
+
+
 class _RegisteredTool:
     def __init__(
         self,
@@ -48,11 +61,14 @@ class _RegisteredTool:
         description: str,
         args_model: type[BaseModel],
         handler: Callable[[BaseModel], object],
+        *,
+        requires_confirmation: bool = False,
     ) -> None:
         self.name = name
         self.description = description
         self.args_model = args_model
         self.handler = handler
+        self.requires_confirmation = requires_confirmation
 
 
 class ToolRegistry:
@@ -67,22 +83,37 @@ class ToolRegistry:
         description: str,
         args_model: type[BaseModel],
         handler: Callable[[BaseModel], object],
+        *,
+        requires_confirmation: bool = False,
     ) -> None:
-        self._tools[name] = _RegisteredTool(name, description, args_model, handler)
+        self._tools[name] = _RegisteredTool(
+            name,
+            description,
+            args_model,
+            handler,
+            requires_confirmation=requires_confirmation,
+        )
 
     def specs(self) -> list[ToolSpec]:
         return [
-            ToolSpec(name=t.name, description=t.description, args_schema=t.args_model.model_json_schema())
+            ToolSpec(
+                name=t.name,
+                description=t.description,
+                args_schema=t.args_model.model_json_schema(),
+                requires_confirmation=t.requires_confirmation,
+            )
             for t in self._tools.values()
         ]
 
     def names(self) -> list[str]:
         return list(self._tools)
 
-    def run(self, name: str, raw_args: dict[str, object]) -> ToolResult:
+    def run(self, name: str, raw_args: dict[str, object], *, confirm: bool = False) -> ToolResult:
         tool = self._tools.get(name)
         if tool is None:
             return ToolResult(ok=False, error=f"unknown tool: {name}")
+        if tool.requires_confirmation and not confirm:
+            return ToolResult(ok=False, error="confirmation required for external action")
         try:
             args = tool.args_model.model_validate(raw_args)
         except ValidationError as exc:
@@ -94,8 +125,13 @@ class ToolRegistry:
         return ToolResult(ok=True, output=output)
 
 
-def build_default_registry(fs_root: Path, store: MemoryStore) -> ToolRegistry:
-    """Register the Phase 17 toolset: read-only filesystem + memory search/write."""
+def build_default_registry(
+    fs_root: Path,
+    store: MemoryStore,
+    web_client: WebClient | None = None,
+    web_sources: WebSourceStore | None = None,
+) -> ToolRegistry:
+    """Register filesystem + memory tools, and (if provided) web tools (Phase 18)."""
     fs = FilesystemTools(fs_root)
     mem = MemoryTools(store)
     registry = ToolRegistry()
@@ -123,4 +159,20 @@ def build_default_registry(fs_root: Path, store: MemoryStore) -> ToolRegistry:
         MemoryWriteArgs,
         lambda a: mem.write(a.content, a.memory_type, a.importance),
     )
+    if web_client is not None and web_sources is not None:
+        web = WebTools(web_client, web_sources)
+        registry.register(
+            "web.search",
+            "Web 検索を行い結果(タイトル/URL)を返す。外部送信のため確認が必要。",
+            WebSearchArgs,
+            lambda a: web.search(a.query, a.limit),
+            requires_confirmation=True,
+        )
+        registry.register(
+            "browser.read",
+            "URL を取得し本文抽出して参照元として保存する。外部送信のため確認が必要。",
+            BrowserReadArgs,
+            lambda a: web.read_url(a.url, a.query),
+            requires_confirmation=True,
+        )
     return registry
