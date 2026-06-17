@@ -10,6 +10,7 @@ from agent.memory.store import MemoryType  # noqa: TC001  (pydantic field type, 
 from agent.tools.base import ToolError, ToolResult, ToolSpec
 from agent.tools.filesystem import FilesystemTools
 from agent.tools.memory_tools import MemoryTools
+from agent.tools.weather import get_weather
 from agent.tools.web import WebTools
 
 if TYPE_CHECKING:
@@ -52,6 +53,10 @@ class WebSearchArgs(BaseModel):
 class BrowserReadArgs(BaseModel):
     url: str
     query: str | None = None
+
+
+class WeatherArgs(BaseModel):
+    location: str = ""
 
 
 class _RegisteredTool:
@@ -158,6 +163,13 @@ def build_default_registry(
         "長期記憶に新しい項目を保存する",
         MemoryWriteArgs,
         lambda a: mem.write(a.content, a.memory_type, a.importance),
+    )
+    registry.register(
+        "weather",
+        "現在の天気・気温を返す(location は都市名、空なら現在地)。外部送信のため確認が必要。",
+        WeatherArgs,
+        lambda a: get_weather(a.location),
+        requires_confirmation=True,
     )
     if web_client is not None and web_sources is not None:
         web = WebTools(web_client, web_sources)
