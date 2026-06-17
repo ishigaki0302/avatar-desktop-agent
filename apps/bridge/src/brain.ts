@@ -187,7 +187,11 @@ async function callOllamaJSON(system: string, userContent: string): Promise<stri
  * empty or insufficient — instead of giving up after one try. Returns the
  * accumulated tool-result transcript (empty string if no tools were used).
  */
-async function runAgentLoop(userMessage: string, broadcast: (event: UIEvent) => void): Promise<string> {
+async function runAgentLoop(
+  userMessage: string,
+  broadcast: (event: UIEvent) => void,
+  turnId: string | null,
+): Promise<string> {
   const transcript: string[] = [];
   for (let step = 0; step < MAX_AGENT_STEPS; step++) {
     const soFar = transcript.length > 0 ? `\n\n# これまでのツール結果\n${transcript.join("\n\n")}` : "";
@@ -199,14 +203,18 @@ async function runAgentLoop(userMessage: string, broadcast: (event: UIEvent) => 
       break;
     }
     if (calls.length === 0) break;
-    const result = await executeTools(calls, broadcast);
+    const result = await executeTools(calls, broadcast, turnId);
     transcript.push(result || `(ツール ${calls.map((c) => c.name).join(", ")} は結果なし)`);
   }
   return transcript.join("\n\n");
 }
 
 /** Execute planned tools via the Python agent service. Read-only web is auto-confirmed. */
-async function executeTools(calls: ToolCall[], broadcast: (event: UIEvent) => void): Promise<string> {
+async function executeTools(
+  calls: ToolCall[],
+  broadcast: (event: UIEvent) => void,
+  turnId: string | null,
+): Promise<string> {
   const base = config.agentService.baseUrl;
   const blocks: string[] = [];
   for (const call of calls) {
@@ -215,7 +223,7 @@ async function executeTools(calls: ToolCall[], broadcast: (event: UIEvent) => vo
       const res = await fetch(`${base}/tools/${call.name}`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ args: call.args, confirm: true }),
+        body: JSON.stringify({ args: call.args, confirm: true, turn_id: turnId }),
         signal: AbortSignal.timeout(TOOL_EXEC_TIMEOUT_MS),
       });
       if (!res.ok) continue;
@@ -235,6 +243,7 @@ export async function ask(
   userMessage: string,
   broadcast: (event: UIEvent) => void,
   session?: SessionLogger,
+  turnId: string | null = null,
 ): Promise<TurnResult | null> {
   if (STUB_MODE) {
     log.info(`[STUB] responding to: "${userMessage}"`);
@@ -260,7 +269,7 @@ export async function ask(
   // ground the answer in the accumulated results.
   let systemPrompt = systemWithMemory;
   if (TOOL_USE_ENABLED && config.brainBackend === "ollama") {
-    const toolContext = await runAgentLoop(userMessage, broadcast);
+    const toolContext = await runAgentLoop(userMessage, broadcast, turnId);
     if (toolContext) {
       // Tool results often contain paths/URLs/numbers, so relax the short-answer
       // format: allow longer text and symbols (/ . : etc.) to report specifics.

@@ -35,6 +35,18 @@ VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
 
 _NEXT_TURN_INDEX = "SELECT COALESCE(MAX(turn_index), -1) + 1 AS next FROM turn_logs WHERE session_id = ?"
 
+_UPDATE_TURN = """
+UPDATE turn_logs SET
+  assistant_output = COALESCE(?, assistant_output),
+  raw_assistant_output = COALESCE(?, raw_assistant_output),
+  emotion = COALESCE(?, emotion),
+  motion = COALESCE(?, motion),
+  latency_ms = COALESCE(?, latency_ms),
+  status = COALESCE(?, status),
+  error = COALESCE(?, error)
+WHERE id = ?
+"""
+
 _INSERT_PROMPT = """
 INSERT INTO prompt_logs
   (id, turn_id, system_prompt, memory_context, recent_context, tool_context,
@@ -282,6 +294,26 @@ class InteractionLogger:
                 ),
             )
         return turn
+
+    def update_turn(
+        self,
+        turn_id: str,
+        *,
+        assistant_output: str | None = None,
+        raw_assistant_output: str | None = None,
+        emotion: str | None = None,
+        motion: str | None = None,
+        latency_ms: int | None = None,
+        status: str | None = None,
+        error: str | None = None,
+    ) -> TurnLog | None:
+        with closing(connect(self._db_path)) as conn, conn:
+            conn.execute(
+                _UPDATE_TURN,
+                (assistant_output, raw_assistant_output, emotion, motion, latency_ms, status, error, turn_id),
+            )
+            row = conn.execute("SELECT * FROM turn_logs WHERE id = ?", (turn_id,)).fetchone()
+        return TurnLog(**dict(row)) if row is not None else None
 
     def end_session(self, session_id: str, summary: str | None = None) -> None:
         with closing(connect(self._db_path)) as conn, conn:

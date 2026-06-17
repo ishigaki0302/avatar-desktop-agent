@@ -166,6 +166,16 @@ class LogTurnRequest(BaseModel):
     error: str | None = None
 
 
+class UpdateTurnRequest(BaseModel):
+    assistant_output: str | None = None
+    raw_assistant_output: str | None = None
+    emotion: str | None = None
+    motion: str | None = None
+    latency_ms: int | None = None
+    status: str | None = None
+    error: str | None = None
+
+
 class EndSessionRequest(BaseModel):
     summary: str | None = None
 
@@ -307,6 +317,23 @@ def log_turn(session_id: str, req: LogTurnRequest, logger: LoggerDep) -> TurnLog
 @app.get("/sessions/{session_id}/turns")
 def get_turns(session_id: str, logger: LoggerDep) -> list[TurnLog]:
     return logger.get_turns(session_id)
+
+
+@app.patch("/turns/{turn_id}")
+def update_turn(turn_id: str, req: UpdateTurnRequest, logger: LoggerDep) -> TurnLog:
+    updated = logger.update_turn(
+        turn_id,
+        assistant_output=req.assistant_output,
+        raw_assistant_output=req.raw_assistant_output,
+        emotion=req.emotion,
+        motion=req.motion,
+        latency_ms=req.latency_ms,
+        status=req.status,
+        error=req.error,
+    )
+    if updated is None:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="turn not found")
+    return updated
 
 
 @app.post("/sessions/{session_id}/end")

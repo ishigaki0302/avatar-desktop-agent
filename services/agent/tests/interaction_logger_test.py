@@ -46,6 +46,23 @@ def test_persists_across_logger_instances(tmp_path: Path) -> None:
     assert len(second.get_turns(session.id)) == 1
 
 
+def test_update_turn_fills_in_assistant_side(tmp_path: Path) -> None:
+    db = tmp_path / "app.sqlite"
+    logger = InteractionLogger(db)
+    session = logger.start_session(model="gemma4:31b")
+    # Open the turn with only the user input (as the bridge does before tools run).
+    turn = logger.log_turn(session.id, user_input="今日の天気は")
+    assert turn.assistant_output is None
+
+    updated = logger.update_turn(turn.id, assistant_output="晴れだよ", emotion="happy", latency_ms=1200)
+    assert updated is not None
+    assert updated.assistant_output == "晴れだよ"
+    assert updated.emotion == "happy"
+    assert updated.latency_ms == 1200
+    # user_input is preserved (COALESCE leaves untouched fields).
+    assert updated.user_input == "今日の天気は"
+
+
 def test_sessions_are_listed_independently(tmp_path: Path) -> None:
     logger = InteractionLogger(tmp_path / "app.sqlite")
     a = logger.start_session(model="gemma4:31b")
