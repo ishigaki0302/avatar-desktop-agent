@@ -37,6 +37,7 @@ from agent.memory.store import Memory, MemoryStore, MemoryType, Task, TaskStatus
 from agent.memory.writer import LLMExtractor, MemoryWriter
 from agent.tools.base import ToolResult, ToolSpec  # noqa: TC001  (FastAPI resolves these at runtime)
 from agent.tools.registry import ToolRegistry, build_default_registry
+from agent.tools.web import HttpWebClient, StubWebClient, WebClient, WebSource, WebSourceStore
 
 app = FastAPI(title="avatar-agent", version="0.1.0")
 
@@ -116,9 +117,27 @@ DashboardDep = Annotated[Dashboard, Depends(get_dashboard)]
 
 
 @lru_cache
+def get_web_sources() -> WebSourceStore:
+    """Return the process-wide web source store (created on first use)."""
+    return WebSourceStore(Path(settings.storage_dir) / "app.sqlite")
+
+
+WebSourcesDep = Annotated[WebSourceStore, Depends(get_web_sources)]
+
+
+def _build_web_client() -> WebClient:
+    return StubWebClient() if settings.web_backend == "stub" else HttpWebClient()
+
+
+@lru_cache
 def get_tool_registry() -> ToolRegistry:
     """Return the process-wide tool registry (created on first use)."""
-    return build_default_registry(Path(settings.tools_root), get_memory_store())
+    return build_default_registry(
+        Path(settings.tools_root),
+        get_memory_store(),
+        _build_web_client(),
+        get_web_sources(),
+    )
 
 
 ToolRegistryDep = Annotated[ToolRegistry, Depends(get_tool_registry)]
@@ -217,6 +236,7 @@ class AnalyzeRequest(BaseModel):
 class ToolInvokeRequest(BaseModel):
     args: dict[str, object] = {}
     turn_id: str | None = None
+    confirm: bool = False
 
 
 @app.get("/health")
@@ -527,7 +547,7 @@ def invoke_tool(
     registry: ToolRegistryDep,
     logger: LoggerDep,
 ) -> ToolResult:
-    result = registry.run(name, req.args)
+    result = registry.run(name, req.args, confirm=req.confirm)
     if req.turn_id:
         logger.log_tool_call(
             req.turn_id,
@@ -540,6 +560,11 @@ def invoke_tool(
             error=result.error,
         )
     return result
+
+
+@app.get("/web/sources")
+def list_web_sources(sources: WebSourcesDep, limit: int = 50) -> list[WebSource]:
+    return sources.list_sources(limit=limit)
 
 
 @app.get("/dashboard", response_class=HTMLResponse)
