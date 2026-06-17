@@ -137,9 +137,10 @@ const TOOL_PLANNING_PROMPT = `\
 - weather {"location":"都市名(空で現在地)"} : 天気・気温・天候
 - web.search {"query":"検索語"} : 最新情報・ニュース・調べもの
 - browser.read {"url":"https://..."} : 特定URLの本文取得
+- filesystem.search {"pattern":"*.pptx"} : PC内のファイルを名前/拡張子で探す
 - memory.search {"query":"語"} : 過去の記憶を検索
 
-天気・気温は weather を使う。最新情報・事実確認は web.search。挨拶や雑談は空配列。`;
+天気・気温は weather。最新情報・事実確認は web.search。ファイル探索は filesystem.search。挨拶や雑談は空配列。`;
 
 /** Parse the planner's JSON into at most MAX_TOOL_CALLS valid tool calls. Pure (tested). */
 export function parseToolCalls(raw: string): ToolCall[] {

@@ -70,4 +70,11 @@ def test_registry_invalid_args(tmp_path: Path) -> None:
 def test_specs_list_all_tools(tmp_path: Path) -> None:
     registry = build_default_registry(tmp_path, MemoryStore(tmp_path / "app.sqlite"))
     names = {s.name for s in registry.specs()}
-    assert names == {"filesystem.list", "filesystem.read", "memory.search", "memory.write", "weather"}
+    assert names == {
+        "filesystem.list",
+        "filesystem.read",
+        "filesystem.search",
+        "memory.search",
+        "memory.write",
+        "weather",
+    }
