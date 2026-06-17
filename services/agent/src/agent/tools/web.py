@@ -12,6 +12,7 @@ import html
 import ipaddress
 import re
 import socket
+import ssl
 from contextlib import closing
 from datetime import UTC, datetime
 from typing import TYPE_CHECKING, Protocol, runtime_checkable
@@ -19,6 +20,7 @@ from urllib.parse import urlparse
 from uuid import uuid4
 
 import httpx
+import truststore
 from pydantic import BaseModel
 
 from agent.logger.db import connect
@@ -30,6 +32,9 @@ if TYPE_CHECKING:
 _FETCH_TIMEOUT_S = 20.0
 _MAX_CONTENT_CHARS = 20_000
 _DEFAULT_SEARCH_LIMIT = 5
+# Verify TLS against the OS trust store so corporate MITM proxies (self-signed
+# root CA) work — the default certifi bundle rejects them.
+_VERIFY = truststore.SSLContext(ssl.PROTOCOL_TLS_CLIENT)
 _TAG_RE = re.compile(r"<[^>]+>")
 _SCRIPT_STYLE_RE = re.compile(r"<(script|style)[^>]*>.*?</\1>", re.IGNORECASE | re.DOTALL)
 _TITLE_RE = re.compile(r"<title[^>]*>(.*?)</title>", re.IGNORECASE | re.DOTALL)
@@ -114,6 +119,7 @@ class HttpWebClient:
             data={"q": query},
             timeout=_FETCH_TIMEOUT_S,
             headers={"User-Agent": "Mozilla/5.0 (avatar-agent)"},
+            verify=_VERIFY,
         )
         res.raise_for_status()
         results: list[SearchResult] = []
@@ -128,6 +134,7 @@ class HttpWebClient:
             timeout=_FETCH_TIMEOUT_S,
             follow_redirects=True,
             headers={"User-Agent": "Mozilla/5.0 (avatar-agent)"},
+            verify=_VERIFY,
         )
         res.raise_for_status()
         return _extract_title(res.text), _html_to_text(res.text)[:_MAX_CONTENT_CHARS]
