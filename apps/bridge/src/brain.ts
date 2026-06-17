@@ -120,6 +120,7 @@ interface OllamaMetrics {
 // ── Tool use: plan → execute (Python agent) → ground the answer (#69) ──────────
 const TOOL_USE_ENABLED = process.env["TOOL_USE_ENABLED"] !== "0";
 const MAX_TOOL_CALLS = 2;
+const MAX_AGENT_STEPS = 3;
 const TOOL_EXEC_TIMEOUT_MS = 30_000;
 const TOOL_OUTPUT_MAX = 1500;
 
@@ -128,19 +129,21 @@ export interface ToolCall {
   args: Record<string, unknown>;
 }
 
-const TOOL_PLANNING_PROMPT = `\
-あなたはツール使用プランナー。ユーザー発話に答えるのに外部ツールが要るか判断する。
-返答は必ずJSON1行のみ: {"tool_calls":[{"name":"...","args":{...}}]}
-不要なら {"tool_calls":[]}。
+const AGENT_STEP_PROMPT = `\
+あなたはツール使用エージェント。ユーザーに答えるため、必要なら複数回ツールを使う。
+これまでのツール結果を見て、次の行動をJSON1行で返す: {"tool_calls":[{"name":"...","args":{...}}]}
+すぐ諦めないこと:
+- 結果が空/不十分なら、別の引数や別のツールで再試行する
+  例) filesystem.search が空なら拡張子だけ '*.pptx' で再検索 / web.search の後は browser.read で本文取得
+- 十分な情報が集まった、または挨拶・雑談・これ以上手段が無い場合のみ {"tool_calls":[]}
 
 使えるツール:
-- weather {"location":"都市名(空で現在地)"} : 天気・気温・天候
-- web.search {"query":"検索語"} : 最新情報・ニュース・調べもの
+- weather {"location":"都市名(空で現在地)"} : 天気・気温
+- web.search {"query":"検索語"} : 最新情報・ニュース・事実確認
 - browser.read {"url":"https://..."} : 特定URLの本文取得
 - filesystem.search {"pattern":"*.pptx"} : PC内のファイルを名前/拡張子で探す
-- memory.search {"query":"語"} : 過去の記憶を検索
-
-天気・気温は weather。最新情報・事実確認は web.search。ファイル探索は filesystem.search。挨拶や雑談は空配列。`;
+- filesystem.list {"path":"."} / filesystem.read {"path":"..."} : 一覧・読取
+- memory.search {"query":"語"} : 過去の記憶を検索`;
 
 /** Parse the planner's JSON into at most MAX_TOOL_CALLS valid tool calls. Pure (tested). */
 export function parseToolCalls(raw: string): ToolCall[] {
@@ -181,13 +184,28 @@ async function callOllamaJSON(system: string, userContent: string): Promise<stri
   return data.message?.content ?? "";
 }
 
-async function planTools(userMessage: string): Promise<ToolCall[]> {
-  try {
-    return parseToolCalls(await callOllamaJSON(TOOL_PLANNING_PROMPT, userMessage));
-  } catch (e) {
-    log.warn("tool planning failed", e);
-    return [];
+/**
+ * Multi-step agentic loop: repeatedly let the LLM pick tools, run them, and
+ * feed results back so it can retry with different args/tools when a result is
+ * empty or insufficient — instead of giving up after one try. Returns the
+ * accumulated tool-result transcript (empty string if no tools were used).
+ */
+async function runAgentLoop(userMessage: string, broadcast: (event: UIEvent) => void): Promise<string> {
+  const transcript: string[] = [];
+  for (let step = 0; step < MAX_AGENT_STEPS; step++) {
+    const soFar = transcript.length > 0 ? `\n\n# これまでのツール結果\n${transcript.join("\n\n")}` : "";
+    let calls: ToolCall[];
+    try {
+      calls = parseToolCalls(await callOllamaJSON(AGENT_STEP_PROMPT, `ユーザー: ${userMessage}${soFar}`));
+    } catch (e) {
+      log.warn("agent step failed", e);
+      break;
+    }
+    if (calls.length === 0) break;
+    const result = await executeTools(calls, broadcast);
+    transcript.push(result || `(ツール ${calls.map((c) => c.name).join(", ")} は結果なし)`);
   }
+  return transcript.join("\n\n");
 }
 
 /** Execute planned tools via the Python agent service. Read-only web is auto-confirmed. */
@@ -241,20 +259,18 @@ export async function ask(
   history.push({ role: "user", content: userMessage });
   trimHistory();
 
-  // Agentic tool use: plan tools, execute via the Python agent, ground the answer.
+  // Agentic tool use: multi-step loop (retries with different tools/args), then
+  // ground the answer in the accumulated results.
   let systemPrompt = systemWithMemory;
   if (TOOL_USE_ENABLED && config.brainBackend === "ollama") {
-    const calls = await planTools(userMessage);
-    if (calls.length > 0) {
-      const toolContext = await executeTools(calls, broadcast);
-      if (toolContext) {
-        // Tool results often contain paths/URLs/numbers, so relax the short-answer
-        // format: allow longer text and symbols (/ . : etc.) to report specifics.
-        systemPrompt =
-          `${systemWithMemory}\n\n# ツール実行結果(この事実に基づいて具体的に答える)\n${toolContext}\n\n` +
-          "※この結果を使うときは text の制約を緩める: 40〜140文字可、ファイルパス・URL・数値・記号を含めてよい。" +
-          "見つかったファイル名やパスは具体的に答える。該当が無ければ正直に無いと言う。";
-      }
+    const toolContext = await runAgentLoop(userMessage, broadcast);
+    if (toolContext) {
+      // Tool results often contain paths/URLs/numbers, so relax the short-answer
+      // format: allow longer text and symbols (/ . : etc.) to report specifics.
+      systemPrompt =
+        `${systemWithMemory}\n\n# ツール実行結果(この事実に基づいて具体的に答える)\n${toolContext}\n\n` +
+        "※この結果を使うときは text の制約を緩める: 40〜140文字可、ファイルパス・URL・数値・記号を含めてよい。" +
+        "見つかったファイル名やパスは具体的に答える。該当が無ければ正直に無いと言う。";
     }
   }
 
