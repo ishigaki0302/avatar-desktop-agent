@@ -33,6 +33,11 @@ class FilesystemReadArgs(BaseModel):
     path: str
 
 
+class FilesystemSearchArgs(BaseModel):
+    pattern: str
+    path: str = "."
+
+
 class MemorySearchArgs(BaseModel):
     query: str
     memory_type: MemoryType | None = None
@@ -151,6 +156,12 @@ def build_default_registry(
         "指定ファイル(許可ルート内、機微ファイルは除外)の内容を返す",
         FilesystemReadArgs,
         lambda a: fs.read_file(a.path),
+    )
+    registry.register(
+        "filesystem.search",
+        "許可ルート内をファイル名/拡張子で再帰検索する(例 pattern='*.pptx')",
+        FilesystemSearchArgs,
+        lambda a: fs.search(a.pattern, a.path),
     )
     registry.register(
         "memory.search",
