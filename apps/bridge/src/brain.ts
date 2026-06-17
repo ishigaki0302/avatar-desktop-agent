@@ -117,6 +117,102 @@ interface OllamaMetrics {
   tokensPerSec?: number;
 }
 
+// ── Tool use: plan → execute (Python agent) → ground the answer (#69) ──────────
+const TOOL_USE_ENABLED = process.env["TOOL_USE_ENABLED"] !== "0";
+const MAX_TOOL_CALLS = 2;
+const TOOL_EXEC_TIMEOUT_MS = 30_000;
+const TOOL_OUTPUT_MAX = 1500;
+
+export interface ToolCall {
+  name: string;
+  args: Record<string, unknown>;
+}
+
+const TOOL_PLANNING_PROMPT = `\
+あなたはツール使用プランナー。ユーザー発話に答えるのに外部ツールが要るか判断する。
+返答は必ずJSON1行のみ: {"tool_calls":[{"name":"...","args":{...}}]}
+不要なら {"tool_calls":[]}。
+
+使えるツール:
+- web.search {"query":"検索語"} : 最新情報・天気・ニュース・調べもの
+- browser.read {"url":"https://..."} : 特定URLの本文取得
+- memory.search {"query":"語"} : 過去の記憶を検索
+
+天気・最新情報・事実確認はためらわず web.search を使う。挨拶や雑談は空配列。`;
+
+/** Parse the planner's JSON into at most MAX_TOOL_CALLS valid tool calls. Pure (tested). */
+export function parseToolCalls(raw: string): ToolCall[] {
+  const parsed = extractJSON(repairJSON(raw));
+  const calls = parsed?.["tool_calls"];
+  if (!Array.isArray(calls)) return [];
+  const out: ToolCall[] = [];
+  for (const c of calls) {
+    if (c && typeof c === "object" && typeof (c as Record<string, unknown>)["name"] === "string") {
+      const rec = c as Record<string, unknown>;
+      const args = rec["args"];
+      out.push({ name: rec["name"] as string, args: (args && typeof args === "object" ? args : {}) as Record<string, unknown> });
+    }
+    if (out.length >= MAX_TOOL_CALLS) break;
+  }
+  return out;
+}
+
+async function callOllamaJSON(system: string, userContent: string): Promise<string> {
+  const res = await fetch(`${config.ollama.baseUrl}/api/chat`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({
+      model: currentModel,
+      stream: false,
+      think: false,
+      format: "json",
+      messages: [
+        { role: "system", content: system },
+        { role: "user", content: userContent },
+      ],
+      options: { temperature: 0, num_predict: 200 },
+    }),
+    signal: AbortSignal.timeout(config.ollama.timeoutMs),
+  });
+  if (!res.ok) throw new Error(`Ollama ${res.status}`);
+  const data = await res.json() as { message?: { content?: string } };
+  return data.message?.content ?? "";
+}
+
+async function planTools(userMessage: string): Promise<ToolCall[]> {
+  try {
+    return parseToolCalls(await callOllamaJSON(TOOL_PLANNING_PROMPT, userMessage));
+  } catch (e) {
+    log.warn("tool planning failed", e);
+    return [];
+  }
+}
+
+/** Execute planned tools via the Python agent service. Read-only web is auto-confirmed. */
+async function executeTools(calls: ToolCall[], broadcast: (event: UIEvent) => void): Promise<string> {
+  const base = config.agentService.baseUrl;
+  const blocks: string[] = [];
+  for (const call of calls) {
+    broadcast({ type: "status", state: "running", message: `ツール実行中: ${call.name}` });
+    try {
+      const res = await fetch(`${base}/tools/${call.name}`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ args: call.args, confirm: true }),
+        signal: AbortSignal.timeout(TOOL_EXEC_TIMEOUT_MS),
+      });
+      if (!res.ok) continue;
+      const data = await res.json() as { ok: boolean; output?: unknown; error?: string };
+      blocks.push(data.ok
+        ? `## ${call.name}\n${truncate(JSON.stringify(data.output), TOOL_OUTPUT_MAX)}`
+        : `## ${call.name}: エラー ${data.error ?? ""}`);
+    } catch (e) {
+      log.warn(`tool ${call.name} failed`, e);
+    }
+  }
+  return blocks.join("\n\n");
+}
+
 // ── Public API ────────────────────────────────────────────────────────────────
 export async function ask(
   userMessage: string,
@@ -143,12 +239,24 @@ export async function ask(
   history.push({ role: "user", content: userMessage });
   trimHistory();
 
+  // Agentic tool use: plan tools, execute via the Python agent, ground the answer.
+  let systemPrompt = systemWithMemory;
+  if (TOOL_USE_ENABLED && config.brainBackend === "ollama") {
+    const calls = await planTools(userMessage);
+    if (calls.length > 0) {
+      const toolContext = await executeTools(calls, broadcast);
+      if (toolContext) {
+        systemPrompt = `${systemWithMemory}\n\n# ツール実行結果(この事実に基づいて答える)\n${toolContext}`;
+      }
+    }
+  }
+
   const startMs = Date.now();
 
   for (let attempt = 0; attempt <= MAX_RETRIES; attempt++) {
     try {
       const { text, emotion, motion, rawBuffer, tokensPerSec, ttftMs } = await streamOllamaResponse(
-        systemWithMemory,
+        systemPrompt,
         history,
         broadcast,
       );
